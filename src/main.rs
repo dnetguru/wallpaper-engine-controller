@@ -3,46 +3,92 @@ mod monitor;
 mod wallpaper;
 
 use clap::Parser;
-use env_logger::Env;
-use log::{info, error};
+use sentry::ClientInitGuard;
 use tokio::signal;
-use cli::{Cli, parse_monitor_thresholds, parse_monitor_ids};
+use tracing::{info, error};
+use sentry::integrations::tracing::EventFilter;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+
+use cli::{Cli, parse_monitor_ids};
 use monitor::VisibilityMonitor;
 use wallpaper::WallpaperController;
 
 #[tokio::main]
 async fn main() {
-    let env = Env::default()
-        .filter_or("WC_LOG_LEVEL", "debug");
-    env_logger::init_from_env(env);
-
     let cli = Cli::parse();
-    
-    // Validate threshold
-    if cli.threshold > 100 {
-        error!("Threshold must be between 0 and 100");
+
+    let _guard: ClientInitGuard;
+    if !cli.disable_sentry {
+        _guard = sentry::init((cli.sentry_dsn, sentry::ClientOptions {
+            release: sentry::release_name!(),
+            enable_logs: true,
+            ..Default::default()
+        }));
+    }
+
+    tracing_subscriber::registry()
+        .with(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::try_new("info").unwrap()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .with(
+            sentry::integrations::tracing::layer().event_filter(|md| match *md.level() {
+                tracing::Level::ERROR => EventFilter::Event,
+                tracing::Level::TRACE | tracing::Level::DEBUG => EventFilter::Ignore,
+                _ => EventFilter::Log,
+            })
+        )
+        .init();
+
+    // Check if we should list monitors
+    if cli.list_monitors {
+        info!("Listing available monitors...");
+        
+        // Create a temporary instance to get monitor information
+        let instance = libvisdesk::LibVisInstance::new();
+        let (monitors, total_visible, total_area) = instance.get_visible_area();
+        
+        println!("\nAvailable Monitors:");
+        println!("-------------------");
+        println!("Total visible area: {} pixels", total_visible);
+        println!("Total desktop area: {} pixels", total_area);
+        // Calculate max_visible sum for proper visibility calculation
+        let total_max_visible: i64 = monitors.iter().map(|m| m.max_visible).sum();
+        println!("Overall visibility: {:.1}%\n", (total_visible as f64 / total_max_visible as f64 * 100.0));
+        
+        for (index, monitor) in monitors.iter().enumerate() {
+            let visibility_percent = if monitor.max_visible > 0 {
+                monitor.current_visible as f64 / monitor.max_visible as f64 * 100.0
+            } else {
+                0.0
+            };
+            
+            println!("Monitor ID {}:", index);
+            println!("  Total area:\t\t{} pixels", monitor.total_area);
+            println!("  Maximum visible:\t{} pixels", monitor.max_visible);
+            println!("  Current visible:\t{} pixels", monitor.current_visible);
+            println!("  Windows handle:\t{}", monitor.monitor_id);
+            println!("  Visibility:\t\t{:.1}%\n", visibility_percent);
+        }
+        
+        println!("Use these Monitor numbers (0, 1, 2, etc.) with the --monitors option to specify which monitors to watch.");
         return;
     }
     
     // Parse monitor IDs
     let monitor_ids = parse_monitor_ids(&cli.monitors);
     
-    // Parse per-monitor thresholds if provided
-    let monitor_thresholds = if let Some(thresholds_str) = &cli.monitor_thresholds {
-        parse_monitor_thresholds(thresholds_str)
-    } else {
-        std::collections::HashMap::new()
-    };
+    // Create the wallpaper controller with the 64-bit flag
+    let controller = WallpaperController::new(cli.wallpaper_engine_path, cli.bit64);
     
-    // Create wallpaper controller with the 64-bit flag
-    let controller = WallpaperController::new(cli.wallpaper_path, cli.bit64);
-    
-    // Create and start visibility monitor
+    // Create and start visibility monitoring
     let mut monitor = VisibilityMonitor::new(
         controller,
-        cli.mode,
+        cli.per_monitor,
         cli.threshold,
-        monitor_thresholds,
         monitor_ids,
     );
     
