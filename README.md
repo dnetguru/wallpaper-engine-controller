@@ -26,33 +26,29 @@ wallpaper-controller [OPTIONS]
 ### Options
 
 ```sh
+Options:
   -m, --monitors <MONITORS>
-          Monitors to watch (comma-separated IDs, or "all" for all monitors) [default: all]
-          
+          Monitors to watch, use numbers shown in Display Settings or use -L to list monitors (comma-separated, or "all" for all monitors) [default: all]
   -t, --threshold <THRESHOLD>
           Minimum visibility threshold percentage (0-100) to pause the wallpaper engine [default: 20]
-          
   -p, --per-monitor
           Per-monitor mode - track visibility for each monitor separately
-          
   -u, --update-rate <UPDATE_RATE>
           Maximum update frequency in milliseconds [default: 1000]
-          
       --wallpaper-engine-path <WALLPAPER_ENGINE_PATH>
           Path to Wallpaper Engine executable [default: "C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine"]
-          
       --64bit
           Use the 64-bit version of Wallpaper Engine (wallpaper64.exe), otherwise use 32-bit (wallpaper32.exe)
-          
   -L, --list-monitors
           List all available monitors and their IDs, then exit
-          
+      --disable-sentry
+          Disable Sentry error reporting
+      --sentry-dsn <SENTRY_DSN>
+          Override the default Sentry error reporting DSN (for debugging purposes)
   -h, --help
           Print help
-          
   -V, --version
           Print version
-
 ```
 
 ## Examples
