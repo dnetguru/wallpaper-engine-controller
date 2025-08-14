@@ -11,7 +11,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use cli::{Cli, parse_monitor_ids};
+use cli::{Cli, parse_monitor_indices};
 use monitor::VisibilityMonitor;
 use wallpaper::WallpaperController;
 
@@ -79,7 +79,7 @@ async fn main() {
     }
     
     // Parse monitor IDs
-    let monitor_ids = parse_monitor_ids(&cli.monitors);
+    let monitor_indices = parse_monitor_indices(&cli.monitors);
     
     // Create the wallpaper controller with the 64-bit flag
     let controller = WallpaperController::new(cli.wallpaper_engine_path, cli.bit64);
@@ -89,7 +89,7 @@ async fn main() {
         controller,
         cli.per_monitor,
         cli.threshold,
-        monitor_ids,
+        monitor_indices,
     );
     
     if monitor.start_monitoring(cli.update_rate).await {

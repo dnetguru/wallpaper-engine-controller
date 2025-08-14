@@ -16,7 +16,7 @@ pub struct VisibilityMonitor {
     controller: Arc<Mutex<WallpaperController>>,
     per_monitor: bool,
     threshold: u8,
-    monitor_ids: Option<Vec<i64>>,
+    monitor_indices: Option<Vec<i64>>,
     tx: Option<mpsc::Sender<MonitorMessage>>,
     running: bool,
 }
@@ -26,14 +26,14 @@ impl VisibilityMonitor {
         controller: WallpaperController,
         per_monitor: bool,
         threshold: u8,
-        monitor_ids: Option<Vec<i64>>,
+        monitor_indices: Option<Vec<i64>>,
     ) -> Self {
         Self {
             instance: LibVisInstance::new(),
             controller: Arc::new(Mutex::new(controller)),
             per_monitor,
             threshold,
-            monitor_ids,
+            monitor_indices,
             tx: None,
             running: false,
         }
@@ -58,7 +58,7 @@ impl VisibilityMonitor {
         let controller = Arc::clone(&self.controller);
         let per_monitor = self.per_monitor;
         let threshold = self.threshold;
-        let monitor_ids = self.monitor_ids.clone();
+        let monitor_indices = self.monitor_indices.clone();
 
         tokio::spawn(async move {
             Self::process_visibility_updates(
@@ -72,10 +72,10 @@ impl VisibilityMonitor {
         // Set up the callback to forward messages to our channel
         let tx_clone = self.tx.clone().unwrap();
         let callback = move |monitors: &[MonitorVisibleInfo], _total_visible: i64, _total_area: i64, _: *mut std::ffi::c_void| {
-            // Filter monitors if specific IDs were provided
-            let filtered_monitors = if let Some(ids) = &monitor_ids {
+            // Filter monitors if specific indices were provided
+            let filtered_monitors = if let Some(indices) = &monitor_indices {
                 monitors.iter()
-                    .filter(|m| ids.contains(&m.monitor_id))
+                    .filter(|m| indices.contains(&m.monitor_index))
                     .cloned()
                     .collect::<Vec<_>>()
             } else {
@@ -168,10 +168,10 @@ impl VisibilityMonitor {
                                 0
                             };
                             
-                            debug!("Monitor {} visibility: {}%", monitor.monitor_id, visibility_percent);
+                            debug!("Monitor IDX {} visibility: {}%", monitor.monitor_index, visibility_percent);
                             
                             // Get previous visibility for this monitor
-                            let previous_visibility = previous_monitor_visibilities.get(&monitor.monitor_id).cloned();
+                            let previous_visibility = previous_monitor_visibilities.get(&monitor.monitor_index).cloned();
                             
                             // Check if we crossed the threshold in either direction
                             let crossed_threshold_down = visibility_percent < threshold && 
@@ -180,16 +180,16 @@ impl VisibilityMonitor {
                                 (previous_visibility.is_none() || previous_visibility.unwrap() < threshold);
                             
                             // Update previous visibility for this monitor
-                            previous_monitor_visibilities.insert(monitor.monitor_id, visibility_percent);
+                            previous_monitor_visibilities.insert(monitor.monitor_index, visibility_percent);
                             
-                            if crossed_threshold_down && controller_lock.is_playing(Some(monitor.monitor_id)) {
-                                info!("Monitor {} visibility below threshold ({}%), pausing", 
-                                      monitor.monitor_id, threshold);
-                                controller_lock.pause(Some(monitor.monitor_id)).await;
-                            } else if crossed_threshold_up && !controller_lock.is_playing(Some(monitor.monitor_id)) {
-                                info!("Monitor {} visibility above threshold ({}%), resuming", 
-                                      monitor.monitor_id, threshold);
-                                controller_lock.play(Some(monitor.monitor_id)).await;
+                            if crossed_threshold_down && controller_lock.is_playing(Some(monitor.monitor_index)) {
+                                info!("Monitor IDX {} visibility below threshold ({}%), pausing",
+                                      monitor.monitor_index, threshold);
+                                controller_lock.pause(Some(monitor.monitor_index)).await;
+                            } else if crossed_threshold_up && !controller_lock.is_playing(Some(monitor.monitor_index)) {
+                                info!("Monitor IDX {} visibility above threshold ({}%), resuming",
+                                      monitor.monitor_index, threshold);
+                                controller_lock.play(Some(monitor.monitor_index)).await;
                             }
                         }
                     }
@@ -218,8 +218,8 @@ impl VisibilityMonitor {
         // Resume wallpapers before stopping the watcher
         {
             let mut controller = self.get_controller().await;
-            if let Some(ref ids) = self.monitor_ids {
-                for &i in ids.iter() { controller.play(Some(i)).await; }
+            if let Some(ref indices) = self.monitor_indices {
+                for &i in indices.iter() { controller.play(Some(i)).await; }
             } else {
                 controller.play(None).await;
             }
