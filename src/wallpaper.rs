@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::collections::HashMap;
 use tracing::{info, error, debug};
-use libvisdesk::LibVisInstance;
 
 #[derive(Clone)]
 pub struct WallpaperController {
@@ -9,49 +8,34 @@ pub struct WallpaperController {
     use_64bit: bool,
     global_state: bool, // true = playing, false = paused
     monitor_states: HashMap<i64, bool>,
-    monitor_id_to_index: HashMap<i64, usize>,
 }
 
 impl WallpaperController {
     pub fn new(base_path: String, use_64bit: bool) -> Self {
-        let instance = LibVisInstance::new();
-        let (monitors, _, _) = instance.get_visible_area();
-        
-        let mut monitor_id_to_index = HashMap::new();
-        
-        for (index, monitor) in monitors.iter().enumerate() {
-            monitor_id_to_index.insert(monitor.monitor_id, index);
-        }
-        
         Self {
             executable_path: base_path,
             use_64bit,
             global_state: true, // Assume wallpaper is playing initially
             monitor_states: HashMap::new(),
-            monitor_id_to_index,
         }
     }
 
-    pub async fn pause(&mut self, monitor_id: Option<i64>) -> bool {
-        self.execute_command("pause", monitor_id).await
+    pub async fn pause(&mut self, monitor_index: Option<i64>) -> bool {
+        self.execute_command("pause", monitor_index).await
     }
 
-    pub async fn play(&mut self, monitor_id: Option<i64>) -> bool {
-        self.execute_command("play", monitor_id).await
+    pub async fn play(&mut self, monitor_index: Option<i64>) -> bool {
+        self.execute_command("play", monitor_index).await
     }
 
-    async fn execute_command(&mut self, command: &str, monitor_id: Option<i64>) -> bool {
+    async fn execute_command(&mut self, command: &str, monitor_index: Option<i64>) -> bool {
         let mut args = vec![String::from("-control"), String::from(command)];
         
-        // Add monitor ID if specified
-        if let Some(id) = monitor_id {
-            // Convert system ID to user-friendly index for wallpaper engine
-            let monitor_index = self.monitor_id_to_index.get(&id).cloned().unwrap_or(0);
-            
+        // Add monitor index if specified
+        if let Some(index) = monitor_index {
             args.push(String::from("-monitor"));
-            args.push(monitor_index.to_string());
-            
-            debug!("Using monitor index {} (system ID: {}) for command", monitor_index, id);
+            args.push(index.to_string());
+            debug!("Using monitor index {} for command", index);
         }
         
         // Determine which executable to use based on the 64-bit flag
@@ -88,9 +72,9 @@ impl WallpaperController {
         }).await.unwrap_or(false);
         
         // Update state tracking
-        match monitor_id {
-            Some(id) => {
-                self.monitor_states.insert(id, command == "play");
+        match monitor_index {
+            Some(index) => {
+                self.monitor_states.insert(index, command == "play");
             },
             None => {
                 self.global_state = command == "play";
@@ -100,9 +84,9 @@ impl WallpaperController {
         status
     }
     
-    pub fn is_playing(&self, monitor_id: Option<i64>) -> bool {
-        match monitor_id {
-            Some(id) => *self.monitor_states.get(&id).unwrap_or(&true),
+    pub fn is_playing(&self, monitor_index: Option<i64>) -> bool {
+        match monitor_index {
+            Some(index) => *self.monitor_states.get(&index).unwrap_or(&true),
             None => self.global_state,
         }
     }

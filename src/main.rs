@@ -11,7 +11,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use cli::{Cli, parse_monitor_ids};
+use cli::{Cli, parse_monitor_indices};
 use monitor::VisibilityMonitor;
 use wallpaper::WallpaperController;
 
@@ -66,7 +66,7 @@ async fn main() {
                 0.0
             };
             
-            println!("Monitor IDX {}:", monitor.monitor_index);
+            println!("Monitor number {} (as shown in Display Settings)", monitor.monitor_index);
             println!("  Total area:\t\t{} pixels", monitor.total_area);
             println!("  Maximum visible:\t{} pixels", monitor.max_visible);
             println!("  Current visible:\t{} pixels", monitor.current_visible);
@@ -74,12 +74,12 @@ async fn main() {
             println!("  Display number:\t{}\n", monitor.monitor_id);
         }
         
-        println!("Use these Monitor IDX numbers (1, 2, 3, etc.) with the --monitors option to specify which monitors to watch.");
+        println!("Use these Monitor numbers (1, 2, 3, etc.) with the --monitors option to specify which monitors to watch.");
         return;
     }
     
     // Parse monitor IDs
-    let monitor_ids = parse_monitor_ids(&cli.monitors);
+    let monitor_indices = parse_monitor_indices(&cli.monitors);
     
     // Create the wallpaper controller with the 64-bit flag
     let controller = WallpaperController::new(cli.wallpaper_engine_path, cli.bit64);
@@ -89,7 +89,7 @@ async fn main() {
         controller,
         cli.per_monitor,
         cli.threshold,
-        monitor_ids,
+        monitor_indices,
     );
     
     if monitor.start_monitoring(cli.update_rate).await {

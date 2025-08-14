@@ -4,7 +4,7 @@ use tracing::warn;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    /// Monitors to watch, use numbers shown in Display Settings or use -L to list monitors (comma-separated IDXs, or "all" for all monitors)
+    /// Monitors to watch, use numbers shown in Display Settings or use -L to list monitors (comma-separated, or "all" for all monitors)
     #[arg(short, long, default_value = "all")]
     pub monitors: String,
 
@@ -41,27 +41,19 @@ pub struct Cli {
     pub sentry_dsn: String,
 }
 
-pub fn parse_monitor_ids(input: &str) -> Option<Vec<i64>> {
+pub fn parse_monitor_indices(input: &str) -> Option<Vec<i64>> {
     if input.to_lowercase() == "all" {
         return None; // None represents all monitors
     }
     
-    // Get the list of all monitors to map indices to actual IDs
-    let instance = libvisdesk::LibVisInstance::new();
-    let (monitors, _, _) = instance.get_visible_area();
-    
-    let mut ids = Vec::new();
+    let mut indices = Vec::new();
     for id_str in input.split(',') {
-        if let Ok(index) = id_str.trim().parse::<usize>() {
-            // Convert index to actual monitor ID
-            if index < monitors.len() {
-                ids.push(monitors[index].monitor_id);
-            } else {
-                // Log a warning if index is out of bounds
-                warn!("Monitor index {} is out of bounds, ignoring", index);
-            }
+        if let Ok(index) = id_str.trim().parse::<i64>() {
+            indices.push(index);
+        } else {
+            warn!("Invalid monitor index '{}', ignoring", id_str);
         }
     }
     
-    Some(ids)
+    Some(indices)
 }
