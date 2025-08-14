@@ -958,9 +958,9 @@ checksum = "6a82ae493e598baaea5209805c49bbf2ea7de956d50d7da0da1164f9c6d28543"
 
 [[package]]
 name = "libvisdesk"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4319660c38a57f882f0f65e7ad37268f1215a34207af878be99ec46321d457e"
+checksum = "ce0a740d4a5821943c0ecb6361e287429d255cfb7abae45a66192447d6b26c18"
 dependencies = [
  "tokio",
  "tracing",

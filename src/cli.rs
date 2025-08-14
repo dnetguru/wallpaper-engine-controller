@@ -4,7 +4,7 @@ use tracing::warn;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    /// Monitors to watch (comma-separated IDs, or "all" for all monitors)
+    /// Monitors to watch, use numbers shown in Display Settings or use -L to list monitors (comma-separated IDXs, or "all" for all monitors)
     #[arg(short, long, default_value = "all")]
     pub monitors: String,
 

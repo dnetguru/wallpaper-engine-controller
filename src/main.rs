@@ -59,22 +59,22 @@ async fn main() {
         let total_max_visible: i64 = monitors.iter().map(|m| m.max_visible).sum();
         println!("Overall visibility: {:.1}%\n", (total_visible as f64 / total_max_visible as f64 * 100.0));
         
-        for (index, monitor) in monitors.iter().enumerate() {
+        for monitor in monitors.iter() {
             let visibility_percent = if monitor.max_visible > 0 {
                 monitor.current_visible as f64 / monitor.max_visible as f64 * 100.0
             } else {
                 0.0
             };
             
-            println!("Monitor ID {}:", index);
+            println!("Monitor IDX {}:", monitor.monitor_index);
             println!("  Total area:\t\t{} pixels", monitor.total_area);
             println!("  Maximum visible:\t{} pixels", monitor.max_visible);
             println!("  Current visible:\t{} pixels", monitor.current_visible);
-            println!("  Windows handle:\t{}", monitor.monitor_id);
-            println!("  Visibility:\t\t{:.1}%\n", visibility_percent);
+            println!("  Visibility:\t\t{:.1}%", visibility_percent);
+            println!("  Display number:\t{}\n", monitor.monitor_id);
         }
         
-        println!("Use these Monitor numbers (0, 1, 2, etc.) with the --monitors option to specify which monitors to watch.");
+        println!("Use these Monitor IDX numbers (1, 2, 3, etc.) with the --monitors option to specify which monitors to watch.");
         return;
     }
     
