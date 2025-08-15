@@ -3,121 +3,26 @@ mod monitor;
 mod wallpaper;
 mod installer;
 
-use std::ffi::OsString;
-use std::time::Duration;
 use clap::Parser;
 use installer::handle_installation;
 use sentry::ClientInitGuard;
 use tokio::signal;
-use tokio::sync::mpsc;
 use tracing::{info, error};
 use sentry::integrations::tracing::EventFilter;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use windows_service::{define_windows_service, service_dispatcher};
-use windows_service::service::{ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus, ServiceType};
-use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
 use cli::{Cli, parse_monitor_indices};
 use monitor::VisibilityMonitor;
 use wallpaper::WallpaperController;
-use tokio::pin;
 
+#[tokio::main]
+async fn main() {
+    let filtered_args: Vec<String> = std::env::args()
+        .filter(|a| !["-safe", "-silent", "-service"].contains(&a.as_str()))
+        .collect();
+    let mut cli = Cli::parse_from(filtered_args);
 
-define_windows_service!(service_main_ffi, service_main);
-pub const SERVICE_NAME: &str = "WallpaperControllerService";
-pub const SERVICE_DISPLAY_NAME: &str = "Wallpaper Controller Service";
-
-fn main() {
-    let cli = Cli::parse();
-
-    if cli.service {
-        service_dispatcher::start(SERVICE_NAME, service_main_ffi).expect("Failed to start service dispatcher");
-        return;
-    }
-
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(app(cli, None));
-}
-
-
-fn service_main(_args: Vec<OsString>) {
-    let cli = Cli::parse();
-
-    // Create shutdown channel
-    let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
-
-    // Register control handler
-    let event_handler = move |control_event: ServiceControl| -> ServiceControlHandlerResult {
-        match control_event {
-            ServiceControl::Stop => {
-                shutdown_tx.blocking_send(()).ok(); // Signal shutdown
-                ServiceControlHandlerResult::NoError
-            }
-            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
-            _ => ServiceControlHandlerResult::NotImplemented,
-        }
-    };
-
-    let status_handle = match service_control_handler::register(SERVICE_NAME, event_handler) {
-        Ok(handle) => handle,
-        Err(err) => {
-            error!("Failed to register service control handler: {}", err);
-            return;
-        }
-    };
-
-    // Report StartPending
-    if let Err(err) = status_handle.set_service_status(ServiceStatus {
-        service_type: ServiceType::OWN_PROCESS,
-        current_state: ServiceState::StartPending,
-        controls_accepted: ServiceControlAccept::empty(),
-        exit_code: ServiceExitCode::Win32(0),
-        checkpoint: 0,
-        wait_hint: Duration::from_secs(5),
-        process_id: None,
-    }) {
-        error!("Failed to set StartPending: {}", err);
-        return;
-    }
-
-    // Run the app logic in a new runtime
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let app_handle = rt.spawn(app(cli, Some(shutdown_rx)));
-
-    // Report Running after starting monitoring
-    if let Err(err) = status_handle.set_service_status(ServiceStatus {
-        service_type: ServiceType::OWN_PROCESS,
-        current_state: ServiceState::Running,
-        controls_accepted: ServiceControlAccept::STOP,
-        exit_code: ServiceExitCode::Win32(0),
-        checkpoint: 0,
-        wait_hint: Duration::default(),
-        process_id: None,
-    }) {
-        error!("Failed to set Running: {}", err);
-        return;
-    }
-
-    // Wait for app to finish (on shutdown)
-    rt.block_on(app_handle).ok();
-
-    // Report Stopped
-    if let Err(err) = status_handle.set_service_status(ServiceStatus {
-        service_type: ServiceType::OWN_PROCESS,
-        current_state: ServiceState::Stopped,
-        controls_accepted: ServiceControlAccept::empty(),
-        exit_code: ServiceExitCode::Win32(0),
-        checkpoint: 0,
-        wait_hint: Duration::default(),
-        process_id: None,
-    }) {
-        error!("Failed to set Stopped: {}", err);
-    }
-}
-
-
-async fn app(mut cli: Cli, shutdown_rx: Option<mpsc::Receiver<()>>) {
     let _guard: ClientInitGuard;
     if !cli.disable_sentry {
         _guard = sentry::init((cli.sentry_dsn.take(), sentry::ClientOptions {
@@ -127,16 +32,24 @@ async fn app(mut cli: Cli, shutdown_rx: Option<mpsc::Receiver<()>>) {
         }));
     }
 
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"))
+            .add_directive("hyper=warn".parse().unwrap())
+            .add_directive("hyper_util=warn".parse().unwrap())
+            .add_directive("reqwest=warn".parse().unwrap())
+            .add_directive("h2=warn".parse().unwrap())
+            .add_directive("http=warn".parse().unwrap())
+            .add_directive("sentry=warn".parse().unwrap())
+            .add_directive("sentry_core=warn".parse().unwrap())
+            .add_directive("sentry_tracing=warn".parse().unwrap());
+
     tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::try_new("info").unwrap()),
-        )
+        .with(filter, )
         .with(tracing_subscriber::fmt::layer())
         .with(
             sentry::integrations::tracing::layer().event_filter(|md| match *md.level() {
                 tracing::Level::ERROR => EventFilter::Event,
-                tracing::Level::TRACE | tracing::Level::DEBUG => EventFilter::Ignore,
+                // tracing::Level::TRACE | tracing::Level::DEBUG => EventFilter::Ignore,
                 _ => EventFilter::Log,
             })
         )
@@ -196,41 +109,19 @@ async fn app(mut cli: Cli, shutdown_rx: Option<mpsc::Receiver<()>>) {
     if monitor.start_monitoring(cli.update_rate).await {
         info!("Started monitoring desktop visibility");
 
-        // Unified shutdown waiting
-        let ctrl_c_fut = signal::ctrl_c();
-        pin!(ctrl_c_fut);
-
-        if let Some(mut rx) = shutdown_rx {
-            tokio::select! {
-                _ = rx.recv() => {
-                    info!("Shutdown signal received from Windows service");
-                }
-                res = ctrl_c_fut => {
-                    match res {
-                        Ok(()) => {
-                            info!("Ctrl+C received");
-                        }
-                        Err(err) => {
-                            error!("Error listening for Ctrl+C: {}", err);
-                        }
-                    }
-                }
-            }
+        if let Err(err) = signal::ctrl_c().await {
+            error!("Unable to listen for shutdown signal: {}", err);
         } else {
-            // Non-service mode: only wait for Ctrl+C
-            if let Err(err) = ctrl_c_fut.await {
-                error!("Unable to listen for shutdown signal: {}", err);
-            } else {
-                info!("Ctrl+C received");
-            }
+            info!("Ctrl+C received");
         }
 
+        info!("Stopping monitoring task...");
         if monitor.stop_monitoring().await {
-            info!("Stopped monitoring desktop visibility");
+            info!("Stopped monitoring task");
         } else {
-            error!("Failed to stop monitoring");
+            error!("Failed to stop monitoring task");
         }
     } else {
-        error!("Failed to start monitoring");
+        error!("Failed to start monitoring task");
     }
 }

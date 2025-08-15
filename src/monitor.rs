@@ -225,6 +225,8 @@ impl VisibilityMonitor {
             }
         } // Release the lock on the controller here
 
+        info!("Resumed all wallpapers...");
+
         // Stop the libvisdesk watcher
         if self.instance.stop_watch_visible_area() {
             self.running = false;

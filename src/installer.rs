@@ -15,9 +15,15 @@ use windows_service::{
     },
     service_manager::{ServiceManager, ServiceManagerAccess},
 };
-use windows_service::service::{Service, ServiceInfo};
+use windows_service::service::{Service, ServiceDependency, ServiceInfo};
 
-use crate::{Cli, SERVICE_DISPLAY_NAME, SERVICE_NAME};
+use crate::cli::Cli;
+
+const SERVICE_NAME: &str = "WallpaperControllerService";
+const SERVICE_DISPLAY_NAME: &str = "Wallpaper Controller Service";
+const WALLPAPER_ENGINE_SERVICE_NAME: &str = "Wallpaper Engine Service";
+const WALLPAPER_SERVICE_32_PATH: &str = "C:\\WINDOWS\\SysWOW64\\wallpaperservice32.exe";
+
 
 pub fn handle_installation(args: &Cli) {
     if args.install.is_none() && !args.add_startup_service {
@@ -46,7 +52,7 @@ pub fn handle_installation(args: &Cli) {
     }
 
     if args.add_startup_service {
-        let mut service_args: Vec<OsString> = vec!["--service".into()];
+        let mut service_args: Vec<OsString> = vec![];
         let exe_path = install_path.unwrap_or_else(|| env::current_exe().expect("Failed to get current exe path"));
 
         {
@@ -80,13 +86,8 @@ pub fn handle_installation(args: &Cli) {
         }
 
         match setup_startup_service(&exe_path, service_args) {
-            Ok(svc) => {
+            Ok(_) => {
                 info!("Successfully set up the startup service.");
-                if let Err(e) = svc.start::<&str>(&[]) {
-                    error!("Failed to start the startup service: {:?}", e);
-                } else {
-                    info!("Successfully started the service.");
-                }
             },
             Err(e) => {
                 error!("Failed to set up startup service: {:?}", e);
@@ -129,7 +130,10 @@ fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<
         }
     }
 
-    debug!("Executable: {} | Launch args: {:?}", SERVICE_NAME, launch_args);
+    let mut wallpaper_service_32_args: Vec<OsString> = vec!["-p".into(), exe_path.into()];
+    wallpaper_service_32_args.extend(launch_args);
+
+    debug!("Executable: {} | Launch args: {:?}", SERVICE_NAME, wallpaper_service_32_args);
 
     let service_info = ServiceInfo {
         name: SERVICE_NAME.into(),
@@ -137,11 +141,11 @@ fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<
         service_type: ServiceType::OWN_PROCESS,
         start_type: ServiceStartType::AutoStart,
         error_control: ServiceErrorControl::Normal,
-        executable_path: PathBuf::from(exe_path),
-        launch_arguments: launch_args,
-        dependencies: vec![],
+        executable_path: WALLPAPER_SERVICE_32_PATH.into(),
+        launch_arguments: wallpaper_service_32_args,
         account_name: None,
         account_password: None,
+        dependencies: vec![ServiceDependency::Service(WALLPAPER_ENGINE_SERVICE_NAME.into())],
     };
 
     let service = manager.create_service(&service_info, ServiceAccess::ALL_ACCESS)?;
