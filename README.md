@@ -1,23 +1,38 @@
-# Wallpaper Engine Controller
+# Wallpaper Controller
 
-A utility to control Wallpaper Engine based on desktop visibility using libvisdesk.
+A utility to control Wallpaper Engine based on desktop visibility. This tool monitors the visibility of your desktop and automatically pauses and resumes Wallpaper Engine to save system resources when the desktop is not visible.
 
 ## Features
 
-- Monitors desktop visibility using [libvisdesk](https://github.com/dnetguru/libvisdesk/)
-- Does not poll and includes a parameter to throttle recalculations
-- Pauses/resumes Wallpaper Engine based on visibility thresholds
-- Supports both global and per-monitor modes
-- Can use either 32-bit or 64-bit Wallpaper Engine executable
-- Automatically resumes all wallpapers upon exit
+- **Automatic Control:** Pauses Wallpaper Engine when the desktop is obscured and resumes it when it becomes visible again.
+- **Resource Saving:** Helps to save CPU and GPU resources by pausing Wallpaper Engine when it's not needed.
+- **Customizable Threshold:** Set a custom visibility threshold to control when Wallpaper Engine should be paused.
+- **Per-Monitor Mode:** Option to monitor visibility on a per-monitor basis.
+- **Flexible Configuration:** Supports both 32-bit and 64-bit versions of Wallpaper Engine.
+- **Windows Service:** Can be installed as a Windows service to run automatically in the background.
+- **List Monitors:** A command to list all connected monitors and their identifiers.
 
 ## Installation
 
-```shell
-cargo install --path .
-```
+You can install `wallpaper-controller` in a couple of ways:
+
+### Using a pre-compiled binary
+
+1.  Download the latest release from the project's releases page.
+2.  Place the executable in a directory of your choice.
+3.  You can then run the application from the command line, or use the `--install` option to copy it to a specific location. This command requires administrator privileges.
+
+    ```shell
+    wallpaper-controller.exe --install "C:\Program Files\WallpaperController"
+    ```
+
+### Building from source
+
+See the "Building from Source" section below.
 
 ## Usage
+
+The basic command to run the application is:
 
 ```shell
 wallpaper-controller [OPTIONS]
@@ -25,93 +40,84 @@ wallpaper-controller [OPTIONS]
 
 ### Options
 
-```sh
-Options:
-  -m, --monitors <MONITORS>
-          Monitors to watch, use numbers shown in Display Settings or use -L to list monitors (comma-separated, or "all" for all monitors) [default: all]
-  -t, --threshold <THRESHOLD>
-          Minimum visibility threshold percentage (0-100) to pause the wallpaper engine [default: 20]
-  -p, --per-monitor
-          Per-monitor mode - track visibility for each monitor separately
-  -u, --update-rate <UPDATE_RATE>
-          Maximum update frequency in milliseconds [default: 1000]
-      --wallpaper-engine-path <WALLPAPER_ENGINE_PATH>
-          Path to Wallpaper Engine executable [default: "C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine"]
-      --64bit
-          Use the 64-bit version of Wallpaper Engine (wallpaper64.exe), otherwise use 32-bit (wallpaper32.exe)
-  -L, --list-monitors
-          List all available monitors and their IDs, then exit
-      --disable-sentry
-          Disable Sentry error reporting
-      --sentry-dsn <SENTRY_DSN>
-          Override the default Sentry error reporting DSN (for debugging purposes)
-  -h, --help
-          Print help
-  -V, --version
-          Print version
-```
+| Flag | Name | Description | Default |
+| --- | --- | --- | --- |
+| `-m`, `--monitors` | `<MONITORS>` | Monitors to watch. Use numbers from Display Settings, or use `-L` to list monitors (comma-separated, or "all"). | `all` |
+| `-t`, `--threshold` | `<THRESHOLD>` | Minimum visibility threshold percentage (0-100) to pause Wallpaper Engine. | `20` |
+| `-p`, `--per-monitor`| | Track visibility for each monitor separately. | `false` |
+| `-u`, `--update-rate`| `<UPDATE_RATE>` | Maximum update frequency in milliseconds. | `1000` |
+| | `--wallpaper-engine-path` | `<PATH>` | Path to Wallpaper Engine executable. | `C:\Program Files (x86)\Steam\steamapps\common\wallpaper_engine` |
+| | `--64bit` | | Use the 64-bit version of Wallpaper Engine (`wallpaper64.exe`). | `false` (uses 32-bit) |
+| `-L`, `--list-monitors` | | List all available monitors and their IDs, then exit. | `false` |
+| | `--install` | `<PATH>` | Install the executable to the specified path and exit. Requires administrator privileges. | |
+| | `--add-startup-service` | | Add a Windows service to run the program. Requires administrator privileges. | |
+| | `--disable-sentry`| | Disable Sentry error reporting. | `false` |
+| | `--sentry-dsn` | `<DSN>` | Override the default Sentry DSN. | |
 
-## Examples
+### Examples
 
-### Basic usage with default settings
-
+**Run with default settings:**
 ```shell
 wallpaper-controller
 ```
 
-This will monitor all monitors in global mode with a 50% visibility threshold and 500ms update rate, using the 32-bit Wallpaper Engine executable.
-
-### Using the 64-bit Wallpaper Engine executable
-
+**Use the 64-bit version of Wallpaper Engine:**
 ```shell
-wallpaper-controller --bit64
+wallpaper-controller --64bit
 ```
 
-This will use the 64-bit version of Wallpaper Engine (wallpaper64.exe) instead of the default 32-bit version.
-
-### Specify monitors to watch
-
+**Monitor specific displays (e.g., monitors 1 and 2):**
 ```shell
-wallpaper-controller --monitors 0,1
+wallpaper-controller --monitors 1,2
 ```
 
-This will only monitor monitors with IDs 0 and 1.
-
-### Per-monitor mode
-
+**Use per-monitor mode with a 10% visibility threshold:**
 ```shell
-wallpaper-controller --per-monitor --threshold 10 --bit64
+wallpaper-controller --per-monitor --threshold 10
 ```
 
-This will use per-monitor mode with a 10% threshold for all monitors, using the 64-bit Wallpaper Engine executable.
+## Running as a Service
 
-### Custom update rate
+You can set up `wallpaper-controller` to run automatically as a Windows service. This is useful if you want the application to start with Windows and run in the background.
 
-```shell
-wallpaper-controller --update-rate 1000
-```
+**Important:** This feature requires that you have Wallpaper Engine's own service enabled. The `wallpaper-controller` service has a dependency on the `Wallpaper Engine Service`.
 
-This will check visibility AT MOST every 1000ms (1 second) instead of the default 1000ms.
-
-### Custom Wallpaper Engine path
+To install the service, run the following command with administrator privileges:
 
 ```shell
-wallpaper-controller --wallpaper-path "D:\Steam\steamapps\common\wallpaper_engine" --bit64
+wallpaper-controller.exe --add-startup-service [any other flags you want to use]
 ```
 
-This specifies a custom path to the Wallpaper Engine executable and uses the 64-bit version.
-
-### List available monitors
+For example, if you want to run the service with the 64-bit version of Wallpaper Engine and a 30% threshold, you would use:
 
 ```shell
-wallpaper-controller --list-monitors
+wallpaper-controller.exe --add-startup-service --64bit --threshold 30
 ```
 
-This will display information about all available monitors including their IDs, visible areas, and current visibility percentages. Use the displayed monitor IDs with the `--monitors` option to specify which monitors to watch.
+The service will be named **Wallpaper Controller Service**. Any arguments you provide with `--add-startup-service` will be saved and used when the service starts.
 
-### Cross compilation on Linux
+To update the service's arguments, simply run the command again with the new arguments. The existing service will be updated with the new configuration.
+
+## Building from Source
+
+To build `wallpaper-controller` from source, you will need to have the Rust toolchain installed.
+
+1.  **Clone the repository:**
+    ```shell
+    git clone <repository-url>
+    cd wallpaper-controller
+    ```
+
+2.  **Build the project:**
+    ```shell
+    cargo build --release
+    ```
+    The executable will be located in the `target/release` directory.
+
+### Cross-compilation (from Linux to Windows)
+If you are on a Linux system, you can cross-compile for Windows:
 ```shell
 rustup target add x86_64-pc-windows-gnu
 sudo apt install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
-cargo build --target x86_64-pc-windows-gnu
+cargo build --target x86_64-pc-windows-gnu --release
 ```
