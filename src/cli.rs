@@ -46,7 +46,7 @@ pub struct Cli {
 
     /// Add a Windows service to run this program with the specified flags and exit
     #[arg(long)]
-    pub startup_service: Option<String>,
+    pub add_startup_service: bool,
 }
 
 pub fn parse_monitor_indices(input: &str) -> Option<Vec<i64>> {

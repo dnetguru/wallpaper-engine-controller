@@ -1,9 +1,12 @@
-use std::env;
-use std::ffi::OsStr;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::env;
 use std::process::exit;
-use tracing::{error, info};
+use std::path::{Path, PathBuf};
+use std::ffi::{OsStr, OsString};
+use tracing::{debug, error, info};
+
+use nameof::name_of;
+use clap::CommandFactory;
 
 use windows_elevate::{check_elevated, elevate};
 use windows_service::{
@@ -13,13 +16,14 @@ use windows_service::{
     service_manager::{ServiceManager, ServiceManagerAccess},
 };
 use windows_service::service::ServiceInfo;
+
 use crate::Cli;
 
 const SERVICE_NAME: &str = "WallpaperControllerService";
 const SERVICE_DISPLAY_NAME: &str = "Wallpaper Controller Service";
 
 pub fn handle_installation(args: &Cli) {
-    if args.install.is_none() && args.startup_service.is_none() {
+    if args.install.is_none() && !args.add_startup_service {
         return; // Nothing to do
     }
 
@@ -31,6 +35,7 @@ pub fn handle_installation(args: &Cli) {
 
     let mut install_path = None;
     if let Some(path_str) = &args.install {
+        info!("Starting installation...");
         match install_executable(path_str) {
             Ok(path) => {
                 info!("Successfully installed to {}", path.display());
@@ -43,13 +48,45 @@ pub fn handle_installation(args: &Cli) {
         }
     }
 
-    if args.startup_service.is_some() {
+    if args.add_startup_service {
+
+        let mut service_args = Vec::new();
         let exe_path = install_path.unwrap_or_else(|| env::current_exe().expect("Failed to get current exe path"));
-        let flags = args.startup_service.as_deref().unwrap_or("").to_string();
-        match setup_startup_service(&exe_path, &flags) {
+
+        {
+            let cmd = Cli::command();
+            let install_arg = cmd
+                .get_arguments()
+                .find(|a| a.get_id() == name_of!(install in Cli))
+                .unwrap();
+            let add_service_arg = cmd
+                .get_arguments()
+                .find(|a| a.get_id() == name_of!(add_startup_service in Cli))
+                .unwrap();
+
+            let install_flag = format!("--{}", install_arg.get_long().unwrap());
+            let install_flag_eq = format!("--{}=", install_arg.get_long().unwrap());
+            let add_service_flag = format!("--{}", add_service_arg.get_long().unwrap());
+
+            let mut args_iter = std::env::args_os().skip(1);
+            while let Some(arg) = args_iter.next() {
+                if arg == install_flag.as_str() {
+                    // This option takes a value, so we skip the next argument as well.
+                    // This assumes the value is passed as a separate argument.
+                    args_iter.next();
+                } else if arg == add_service_flag.as_str() || arg.to_string_lossy().starts_with(install_flag_eq.as_str()) {
+                    // This handles `--startup-service` and `--option=value` form for `--install` so we just skip this argument.
+                    continue;
+                } else {
+                    service_args.push(arg.into());
+                }
+            }
+        }
+
+        match setup_startup_service(&exe_path, service_args) {
             Ok(_) => info!("Successfully set up the startup service."),
             Err(e) => {
-                error!("Failed to set up startup service: {}", e);
+                error!("Failed to set up startup service: {:?}", e);
                 exit(1);
             }
         }
@@ -77,13 +114,15 @@ fn install_executable(target: &str) -> Result<PathBuf, Box<dyn std::error::Error
     Ok(target_path)
 }
 
-fn setup_startup_service(exe_path: &Path, flags: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error>> {
     let manager = ServiceManager::local_computer(None::<&OsStr>, ServiceManagerAccess::all())?;
 
     if let Ok(service) = manager.open_service(SERVICE_NAME, ServiceAccess::all()) {
         info!("Service '{}' already exists. Deleting it.", SERVICE_NAME);
         service.delete()?;
     }
+
+    debug!("Executable: {} | Launch args: {:?}", SERVICE_NAME, launch_args);
 
     let service_info = ServiceInfo {
         name: SERVICE_NAME.into(),
@@ -92,14 +131,13 @@ fn setup_startup_service(exe_path: &Path, flags: &str) -> Result<(), Box<dyn std
         start_type: ServiceStartType::AutoStart,
         error_control: ServiceErrorControl::Normal,
         executable_path: PathBuf::from(exe_path),
-        launch_arguments: vec![flags.into()],
+        launch_arguments: launch_args,
         dependencies: vec![],
         account_name: None,
         account_password: None,
     };
 
     manager.create_service(&service_info, ServiceAccess::ALL_ACCESS)?;
-
     info!("Service '{}' created successfully.", SERVICE_NAME);
     Ok(())
 }
