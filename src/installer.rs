@@ -15,7 +15,7 @@ use windows_service::{
     },
     service_manager::{ServiceManager, ServiceManagerAccess},
 };
-use windows_service::service::ServiceInfo;
+use windows_service::service::{Service, ServiceInfo};
 
 use crate::Cli;
 
@@ -49,7 +49,6 @@ pub fn handle_installation(args: &Cli) {
     }
 
     if args.add_startup_service {
-
         let mut service_args = Vec::new();
         let exe_path = install_path.unwrap_or_else(|| env::current_exe().expect("Failed to get current exe path"));
 
@@ -75,7 +74,7 @@ pub fn handle_installation(args: &Cli) {
                     // This assumes the value is passed as a separate argument.
                     args_iter.next();
                 } else if arg == add_service_flag.as_str() || arg.to_string_lossy().starts_with(install_flag_eq.as_str()) {
-                    // This handles `--startup-service` and `--option=value` form for `--install` so we just skip this argument.
+                    // This handles `--startup-service` and `--install=value` form so we just skip this argument.
                     continue;
                 } else {
                     service_args.push(arg.into());
@@ -84,7 +83,14 @@ pub fn handle_installation(args: &Cli) {
         }
 
         match setup_startup_service(&exe_path, service_args) {
-            Ok(_) => info!("Successfully set up the startup service."),
+            Ok(svc) => {
+                info!("Successfully set up the startup service.");
+                if let Err(e) = svc.start::<&str>(&[]) {
+                    error!("Failed to start the startup service: {:?}", e);
+                } else {
+                    info!("Successfully started the service.");
+                }
+            },
             Err(e) => {
                 error!("Failed to set up startup service: {:?}", e);
                 exit(1);
@@ -114,12 +120,16 @@ fn install_executable(target: &str) -> Result<PathBuf, Box<dyn std::error::Error
     Ok(target_path)
 }
 
-fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error>> {
+fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<Service, Box<dyn std::error::Error>> {
     let manager = ServiceManager::local_computer(None::<&OsStr>, ServiceManagerAccess::all())?;
 
     if let Ok(service) = manager.open_service(SERVICE_NAME, ServiceAccess::all()) {
         info!("Service '{}' already exists. Deleting it.", SERVICE_NAME);
-        service.delete()?;
+        if let Err(e) = service.delete() {
+            error!("Failed to delete service '{}'. You might need to log out and/or restart your computer to proceed", SERVICE_NAME);
+            error!("Error: {}", e);
+            exit(2);
+        }
     }
 
     debug!("Executable: {} | Launch args: {:?}", SERVICE_NAME, launch_args);
@@ -137,7 +147,7 @@ fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<
         account_password: None,
     };
 
-    manager.create_service(&service_info, ServiceAccess::ALL_ACCESS)?;
+    let service = manager.create_service(&service_info, ServiceAccess::ALL_ACCESS)?;
     info!("Service '{}' created successfully.", SERVICE_NAME);
-    Ok(())
+    Ok(service)
 }
