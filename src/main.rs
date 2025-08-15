@@ -1,8 +1,10 @@
 mod cli;
 mod monitor;
 mod wallpaper;
+mod installer;
 
 use clap::Parser;
+use installer::handle_installation;
 use sentry::ClientInitGuard;
 use tokio::signal;
 use tracing::{info, error};
@@ -17,11 +19,11 @@ use wallpaper::WallpaperController;
 
 #[tokio::main]
 async fn main() {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
 
     let _guard: ClientInitGuard;
     if !cli.disable_sentry {
-        _guard = sentry::init((cli.sentry_dsn, sentry::ClientOptions {
+        _guard = sentry::init((cli.sentry_dsn.take(), sentry::ClientOptions {
             release: sentry::release_name!(),
             enable_logs: true,
             ..Default::default()
@@ -42,6 +44,8 @@ async fn main() {
             })
         )
         .init();
+
+    handle_installation(&cli);
 
     // Check if we should list monitors
     if cli.list_monitors {

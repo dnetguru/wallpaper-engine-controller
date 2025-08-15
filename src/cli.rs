@@ -38,7 +38,15 @@ pub struct Cli {
 
     /// Override the default Sentry error reporting DSN (for debugging purposes)
     #[arg(long, default_value = "https://c6caa06487e9769daccfbedcd8de6324@o504783.ingest.us.sentry.io/4509839881076736")]
-    pub sentry_dsn: String,
+    pub sentry_dsn: Option<String>,
+
+    /// Install the assembly to the specified path and exit
+    #[arg(long)]
+    pub install: Option<String>,
+
+    /// Add a Windows service to run this program with the specified flags and exit
+    #[arg(long)]
+    pub startup_service: Option<String>,
 }
 
 pub fn parse_monitor_indices(input: &str) -> Option<Vec<i64>> {
