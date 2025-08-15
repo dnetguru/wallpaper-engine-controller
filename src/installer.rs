@@ -17,10 +17,7 @@ use windows_service::{
 };
 use windows_service::service::{Service, ServiceInfo};
 
-use crate::Cli;
-
-const SERVICE_NAME: &str = "WallpaperControllerService";
-const SERVICE_DISPLAY_NAME: &str = "Wallpaper Controller Service";
+use crate::{Cli, SERVICE_DISPLAY_NAME, SERVICE_NAME};
 
 pub fn handle_installation(args: &Cli) {
     if args.install.is_none() && !args.add_startup_service {
@@ -49,7 +46,7 @@ pub fn handle_installation(args: &Cli) {
     }
 
     if args.add_startup_service {
-        let mut service_args = Vec::new();
+        let mut service_args: Vec<OsString> = vec!["--service".into()];
         let exe_path = install_path.unwrap_or_else(|| env::current_exe().expect("Failed to get current exe path"));
 
         {
