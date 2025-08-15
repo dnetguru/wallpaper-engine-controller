@@ -1,8 +1,8 @@
-use std::fs;
+use std::{fs, io};
 use std::env;
-use std::process::exit;
 use std::path::{Path, PathBuf};
 use std::ffi::{OsStr, OsString};
+use std::io::BufRead;
 use tracing::{debug, error, info};
 
 use nameof::name_of;
@@ -25,6 +25,13 @@ const WALLPAPER_ENGINE_SERVICE_NAME: &str = "Wallpaper Engine Service";
 const WALLPAPER_SERVICE_32_PATH: &str = "C:\\WINDOWS\\SysWOW64\\wallpaperservice32.exe";
 
 
+fn exit(code: i32) {
+    println!("Press Enter to exit...");
+    let stdin = io::stdin();
+    let _ = stdin.lock().lines().next();
+    std::process::exit(code);
+}
+
 pub fn handle_installation(args: &Cli) {
     if args.install.is_none() && !args.add_startup_service {
         return; // Nothing to do
@@ -33,7 +40,7 @@ pub fn handle_installation(args: &Cli) {
     if !check_elevated().unwrap_or(false) {
         info!("Requesting administrator privileges...");
         elevate().expect("Failed to elevate administrator privileges");
-        exit(0); // Exit the non-elevated process
+        std::process::exit(0); // Exit the non-elevated process
     }
 
     let mut install_path = None;
@@ -45,7 +52,7 @@ pub fn handle_installation(args: &Cli) {
                 install_path = Some(path);
             }
             Err(e) => {
-                error!("Installation failed: {:}", e);
+                error!("Installation failed (does the file already exist and running?): {:}", e);
                 exit(1);
             }
         }
@@ -86,8 +93,14 @@ pub fn handle_installation(args: &Cli) {
         }
 
         match setup_startup_service(&exe_path, service_args) {
-            Ok(_) => {
+            Ok(svc) => {
                 info!("Successfully set up the startup service.");
+                if let Err(e) = svc.start::<&str>(&[]) {
+                    error!("Failed to start the startup service: {}", e);
+                    exit(1);
+                } else {
+                    info!("Service started successfully.");
+                }
             },
             Err(e) => {
                 error!("Failed to set up startup service: {:?}", e);
@@ -123,6 +136,7 @@ fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<
 
     if let Ok(service) = manager.open_service(SERVICE_NAME, ServiceAccess::all()) {
         info!("Service '{}' already exists. Deleting it.", SERVICE_NAME);
+        let _ = service.stop(); // Try and stop first, in case it's running
         if let Err(e) = service.delete() {
             error!("Failed to delete service '{}'. You might need to log out and/or restart your computer to proceed", SERVICE_NAME);
             error!("Error: {}", e);

@@ -1,27 +1,40 @@
+#![windows_subsystem = "windows"]
+
 mod cli;
 mod monitor;
 mod wallpaper;
 mod installer;
 
 use clap::Parser;
-use installer::handle_installation;
-use sentry::ClientInitGuard;
 use tokio::signal;
+use sentry::ClientInitGuard;
 use tracing::{info, error};
-use sentry::integrations::tracing::EventFilter;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use sentry::integrations::tracing::EventFilter;
+use windows::Win32::System::Console::AllocConsole;
 use cli::{Cli, parse_monitor_indices};
+use installer::handle_installation;
 use monitor::VisibilityMonitor;
 use wallpaper::WallpaperController;
+use std::io::{self, BufRead};
 
 #[tokio::main]
 async fn main() {
-    let filtered_args: Vec<String> = std::env::args()
+    let raw_args: Vec<String> = std::env::args().collect();
+    let in_silent_mode = raw_args.iter().any(|a| a == "-silent");
+
+    let filtered_args: Vec<String> = raw_args
+        .into_iter()
         .filter(|a| !["-safe", "-silent", "-service"].contains(&a.as_str()))
         .collect();
+
     let mut cli = Cli::parse_from(filtered_args);
+
+    if !in_silent_mode {
+        let _ = unsafe { AllocConsole() };
+    }
 
     let _guard: ClientInitGuard;
     if !cli.disable_sentry {
@@ -45,11 +58,11 @@ async fn main() {
 
     tracing_subscriber::registry()
         .with(filter, )
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_ansi(false))
         .with(
             sentry::integrations::tracing::layer().event_filter(|md| match *md.level() {
                 tracing::Level::ERROR => EventFilter::Event,
-                // tracing::Level::TRACE | tracing::Level::DEBUG => EventFilter::Ignore,
+                tracing::Level::TRACE | tracing::Level::DEBUG => EventFilter::Ignore,
                 _ => EventFilter::Log,
             })
         )
@@ -123,5 +136,11 @@ async fn main() {
         }
     } else {
         error!("Failed to start monitoring task");
+    }
+
+    if !in_silent_mode {
+        println!("Press Enter to exit...");
+        let stdin = io::stdin();
+        let _ = stdin.lock().lines().next();
     }
 }
