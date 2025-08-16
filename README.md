@@ -70,9 +70,7 @@ sudo apt install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
 cargo build --target x86_64-pc-windows-gnu --release  
 ```
 
-## Usage
-
-### Quick Start
+## Quick Start
 
 ```shell  
 wallpaper-controller -m all -t 10  
@@ -84,23 +82,25 @@ List monitors first:
 wallpaper-controller --list-monitors  
 ```  
 
-Example output:  
-```text  
-Available Monitors:  
--------------------  
-Total visible area: 1234567 pixels  
-Total desktop area: 2345678 pixels  
-Overall visibility: 52.7%  
-
-Monitor number 1 (as shown in Display Settings)  
-  Total area:		2073600 pixels  
-  Maximum visible:	2073600 pixels  
-  Current visible:	1094400 pixels  
-  Visibility:		52.8%  
-  Display number:	0  
+#### Custom threshold and update rate:
+This would pause Wallpaper Engine if less than 15% of your desktop is visible across all monitors. It does not start/stop wallpaper engine more frequently than every 0.5 seconds.   
+```shell  
+wallpaper-controller --threshold 15 --update-rate 500  
+```
+#### Specific monitors, 64-bit:
+This would pause Wallpaper Engine if less than 20% of your desktop is visible across monitors numbered 1 and 3. All other monitors are ignored.\
+The monitor numbers can be found by running the program with `-L` command and they should match the numbers shown in Windows' Display Settings.
+```shell  
+wallpaper-controller -m 1,3 
 ```
 
-### CLI Options
+#### Custom path:
+You can specify a custom path to Wallppaper Engine installation (if you are not using the default).
+```shell  
+wallpaper-controller --wallpaper-engine-path "D:\Games\WallpaperEngine" --64bit  
+```
+
+## CLI Options
 
 ```sh  
 Usage: wallpaper-controller.exe [OPTIONS]  
@@ -134,22 +134,10 @@ Options:
           Print version  
 ```
 
-### Examples
+### Silent Mode
+It is possible to launch this application with `-silent` which causes it completely run in the foreground, not showing a console window.\
+This is the default behavior when installed as a service.
 
-- Global mode, custom threshold (pauses all if total visibility <15%):  
-  ```shell  
-  wallpaper-controller --threshold 15 --update-rate 500  
-  ```
-
-- Specific monitors, 64-bit (specifying monitor numbers with -m causes calculations to only use desktops on those monitors; ignoring all other monitors):  
-  ```shell  
-  wallpaper-controller -m 1,3 --64bit  
-  ```
-
-- Custom path:  
-  ```shell  
-  wallpaper-controller --wallpaper-engine-path "D:\Games\WallpaperEngine" --64bit  
-  ```
 
 ## Contributing
 
