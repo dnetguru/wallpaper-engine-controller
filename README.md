@@ -7,7 +7,8 @@ While Wallpaper Engine has basic occlusion detection (pausing for maximized wind
 This tool enables using more resource-intensive wallpapers by pausing rendering when they're not visible.\
 \
 Note: Wallpaper Engine currently only supports pausing/resuming all monitors at once—no per-monitor control.\
-Recommend specifying your main monitor with `-m` (e.g., `-m 1`); if its visibility drops below threshold, all pause. The code supports per-monitor if Wallpaper Engine adds it.
+Recommend specifying your main monitor with `-m` (e.g., `-m 1`); if its visibility drops below threshold, all pause.\
+The code supports per-monitor pause/resume which can be enabled if Wallpaper Engine adds it.
 
 ## Features
 - **Event-Driven Monitoring**: Uses libvisdesk for real-time desktop visibility tracking—no wasteful polling.
