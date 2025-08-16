@@ -36,17 +36,6 @@ async fn main() {
         .filter(|a| !["-safe", "-silent", "-service"].contains(&a.as_str()))
         .collect();
 
-    let mut cli = Cli::parse_from(&filtered_args);
-
-    // Sort the filtered args for unique key
-    filtered_args.sort();
-
-    // Create a unique mutex name based on sorted args
-    let mut hasher = DefaultHasher::new();
-    filtered_args[1..].join("|").hash(&mut hasher);
-    let instance_mutex = SingleInstance::new(&format!("Global\\WallpaperController_{}", hasher.finish())).unwrap();
-    let any_instance_mutex = SingleInstance::new("Global\\WallpaperController_Any").unwrap();
-
     let ansi_colors =
         if in_silent_mode {
             false
@@ -57,6 +46,17 @@ async fn main() {
             println!();
             true
         };
+
+    let mut cli = Cli::parse_from(&filtered_args);
+
+    // Sort the filtered args for unique key
+    filtered_args.sort();
+
+    // Create a unique mutex name based on sorted args
+    let mut hasher = DefaultHasher::new();
+    filtered_args[1..].join("|").hash(&mut hasher);
+    let instance_mutex = SingleInstance::new(&format!("Global\\WallpaperController_{}", hasher.finish())).unwrap();
+    let any_instance_mutex = SingleInstance::new("Global\\WallpaperController_Any").unwrap();
 
     if !instance_mutex.is_single() {
         if !in_silent_mode {
