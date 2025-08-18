@@ -6,7 +6,8 @@ The goal is to save CPU/GPU resources when your desktop is obscured (e.g., by fu
 ## Why Use This?
 
 Wallpaper Engine has basic occlusion detection (pausing for maximized windows on a monitor), but it doesn't handle advanced scenarios like multiple side-by-side windows obscuring the desktop.\
-This tool enables using more resource-intensive wallpapers by pausing rendering when they're not visible as well as allowing the user to specify a threshold for what percentage of the dekstop needs to be visible for the rendering to continue.
+\
+This tool enables using more resource-intensive wallpapers by pausing rendering when they're not visible as well as allowing the user to specify a threshold for what percentage of the dekstop needs to be visible for the rendering to continue.\
 \
 It is recommended to specify your main monitor with `-m` (e.g., `-m 1`); if its visibility drops below the threshold, all wallpapers pause.\
 The code supports per-monitor pause/resume, which can be enabled if Wallpaper Engine adds this feature in the future.\
