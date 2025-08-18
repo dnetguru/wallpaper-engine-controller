@@ -5,13 +5,13 @@ The goal is to save CPU/GPU resources when your desktop is obscured (e.g., by fu
 
 ## Why Use This?
 
-Wallpaper Engine has basic occlusion detection (pausing for maximized windows on a single monitor), but it doesn't handle advanced scenarios like multiple side-by-side windows obscuring most of the desktop.\
-This tool enables using more resource-intensive wallpapers by pausing rendering when they're not visible.  
+Wallpaper Engine has basic occlusion detection (pausing for maximized windows on a monitor), but it doesn't handle advanced scenarios like multiple side-by-side windows obscuring the desktop.\
+This tool enables using more resource-intensive wallpapers by pausing rendering when they're not visible as well as allowing the user to specify a threshold for what percentage of the dekstop needs to be visible for the rendering to continue.
 \
 It is recommended to specify your main monitor with `-m` (e.g., `-m 1`); if its visibility drops below the threshold, all wallpapers pause.\
 The code supports per-monitor pause/resume, which can be enabled if Wallpaper Engine adds this feature in the future.\
 \
-**Note:** Wallpaper Engine currently only supports pausing/resuming all monitors at once—no per-monitor control.
+**Note:** Wallpaper Engine currently [only supports](https://help.wallpaperengine.io/en/functionality/cli.html#pause) pausing/resuming all monitors at once—no per-monitor control via CLI.
 
 ## Features
 
@@ -20,8 +20,8 @@ The code supports per-monitor pause/resume, which can be enabled if Wallpaper En
 - **Customizable Thresholds**: Pause when visibility drops below a set percentage (0-100).
 - **Throttle Updates**: Configurable max frequency for visibility checks (default: 1000ms).
 - **32/64-Bit Support**: Compatible with both Wallpaper Engine versions.
-- **Graceful Shutdown**: Auto-resumes wallpapers on exit or Ctrl+C.
-- **Service Mode**: Run as a Windows background service for always-on operation.
+- **Graceful Shutdown**: Auto-resumes wallpapers on exit.
+- **Service Mode**: Run as a Windows background service for always-on operation with automatic installation.
 
 ## Prerequisites
 
