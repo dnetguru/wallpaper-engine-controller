@@ -9,8 +9,7 @@ Wallpaper Engine has basic occlusion detection (pausing for maximized windows on
 \
 This tool enables using more resource-intensive wallpapers by pausing rendering when they're not visible as well as allowing the user to specify a threshold for what percentage of the dekstop needs to be visible for the rendering to continue.\
 \
-It is recommended to specify your main monitor with `-m` (e.g., `-m 1`); if its visibility drops below the threshold, all wallpapers pause.\
-The code supports per-monitor pause/resume, which can be enabled if Wallpaper Engine adds this feature in the future.\
+It is recommended to specify your main monitor with `-m` (e.g., `-m 1`); if its visibility drops below the threshold, all wallpapers pause. The code supports per-monitor pause/resume, which can be enabled if Wallpaper Engine adds support for per-monitor external control in the future.\
 \
 **Note:** Wallpaper Engine currently [only supports](https://help.wallpaperengine.io/en/functionality/cli.html#pause) pausing/resuming all monitors at once—no per-monitor control via CLI.
 
