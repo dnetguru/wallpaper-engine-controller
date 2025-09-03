@@ -21,7 +21,7 @@ pub struct Cli {
     pub update_rate: u64,
 
     /// Path to Wallpaper Engine executable
-    #[arg(long, default_value = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine")]
+    #[arg(short='w', long, default_value = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine")]
     pub wallpaper_engine_path: String,
     
     /// Use the 64-bit version of Wallpaper Engine (wallpaper64.exe), otherwise use 32-bit (wallpaper32.exe)
@@ -42,19 +42,18 @@ pub struct Cli {
 
     /// Launch interactive installer (TUI)
     #[arg(long)]
-    pub install: bool,
+    pub install_tui: bool,
 
-    // Hidden/internal fields populated by the TUI
-    /// Internal: directory chosen by TUI for installation
-    #[arg(skip)]
+    /// Install the executable into the specified directory and exit (non-interactive path)
+    #[arg(long = "install-dir")]
     pub install_dir: Option<String>,
 
-    /// Internal: install as Windows Service (chosen by TUI)
-    #[arg(skip)]
+    /// Add a Windows service to run this program with the specified flags and exit (non-interactive path)
+    #[arg(long = "add-startup-service")]
     pub add_startup_service: bool,
 
-    /// Internal: install as Scheduled Task (chosen by TUI)
-    #[arg(skip)]
+    /// Add a Windows Scheduled Task to run this program at user logon and exit (non-interactive path)
+    #[arg(long = "add-startup-task")]
     pub add_startup_task: bool,
 }
 

@@ -65,21 +65,61 @@ fn validate_update_rate(s: &str) -> std::result::Result<(), String> {
     }
 }
 
-fn validate_we_path(s: &str, require_64: bool) -> std::result::Result<(), String> {
-    let p = Path::new(s.trim());
-    if !p.exists() || !p.is_dir() { return Err("Path must exist and be a folder".into()); }
-    let ok = if require_64 {
-        p.join("wallpaper64.exe").exists()
-    } else {
-        p.join("wallpaper32.exe").exists() || p.join("wallpaper64.exe").exists()
-    };
-    if !ok {
-        return Err(if require_64 {
-            "Could not find wallpaper64.exe in this folder".into()
-        } else {
-            "Could not find wallpaper32.exe or wallpaper64.exe in this folder".into()
-        });
+// fn validate_we_path(s: &str, require_64: bool) -> std::result::Result<(), String> {
+//     let p = Path::new(s.trim());
+//     if !p.exists() || !p.is_dir() { return Err("Path must exist and be a folder".into()); }
+//     let ok = if require_64 {
+//         p.join("wallpaper64.exe").exists()
+//     } else {
+//         p.join("wallpaper32.exe").exists() || p.join("wallpaper64.exe").exists()
+//     };
+//     if !ok {
+//         return Err(if require_64 {
+//             "Could not find wallpaper64.exe in this folder".into()
+//         } else {
+//             "Could not find wallpaper32.exe or wallpaper64.exe in this folder".into()
+//         });
+//     }
+//     Ok(())
+// }
+
+pub fn run_install_tui_and_relaunch(base: Cli) -> Result<()> {
+    // Run the wizard to collect all settings
+    let new_cli = run_install_tui(base)?;
+
+    // Build argv and relaunch current executable
+    let exe = std::env::current_exe()?;
+    let mut args: Vec<std::ffi::OsString> = Vec::new();
+
+    if let Some(dir) = &new_cli.install_dir {
+        args.push("--install-dir".into());
+        args.push(dir.clone().into());
     }
+    if new_cli.add_startup_service { args.push("--add-startup-service".into()); }
+    if new_cli.add_startup_task { args.push("--add-startup-task".into()); }
+
+    // runtime flags
+    args.push("-m".into());
+    args.push(new_cli.monitors.clone().into());
+
+    if let Some(t) = new_cli.threshold { args.push("-t".into());args.push(t.to_string().into()); }
+    if new_cli.per_monitor { args.push("-p".into()); }
+
+    args.push("-u".into());
+    args.push(new_cli.update_rate.to_string().into());
+
+    // TODO: This won't work with wallpaperservice32.exe
+    // if !new_cli.wallpaper_engine_path.is_empty() {
+    //     args.push("-w".into());
+    //     args.push(format!("'{}'", new_cli.wallpaper_engine_path).into());
+    // }
+
+    if new_cli.bit64 { args.push("--64bit".into()); }
+
+    if new_cli.disable_sentry { args.push("--disable-sentry".into()); }
+    if let Some(dsn) = &new_cli.sentry_dsn { args.push("--sentry-dsn".into()); args.push(dsn.clone().into()); }
+    std::process::Command::new(exe).args(args).spawn()?;
+
     Ok(())
 }
 
@@ -161,7 +201,7 @@ pub fn run_install_tui(mut base: Cli) -> Result<Cli> {
         .interact()?;
 
     if advanced {
-        println!("\n• Update rate: How often to recalculate visibility (in milliseconds). Lower = more responsive, higher CPU. Suggest 200–5000.");
+        println!("\n• Update rate: Minimum time between visibility recalculations (in milliseconds).\n   Lower = more responsive, higher CPU and more frequent pause/resume for Wallpaper Engine.");
         let upd_str: String = Input::with_theme(&theme)
             .with_prompt("Update rate in ms (100–60000)")
             .default(base.update_rate.to_string())
@@ -174,12 +214,13 @@ pub fn run_install_tui(mut base: Cli) -> Result<Cli> {
             .default(base.bit64)
             .interact()?;
 
-        println!("\n• Wallpaper Engine folder:");
-        base.wallpaper_engine_path = Input::with_theme(&theme)
-            .with_prompt("Wallpaper Engine install path")
-            .default(base.wallpaper_engine_path.clone())
-            .validate_with(|s: &String| validate_we_path(s, base.bit64))
-            .interact_text()?;
+        // TODO: See TODO note in run_install_tui_and_relaunch
+        // println!("\n• Wallpaper Engine folder:");
+        // base.wallpaper_engine_path = Input::with_theme(&theme)
+        //     .with_prompt("Wallpaper Engine install path")
+        //     .default(base.wallpaper_engine_path.clone())
+        //     .validate_with(|s: &String| validate_we_path(s, base.bit64))
+        //     .interact_text()?;
     }
 
     // Summary & confirmation
@@ -199,7 +240,7 @@ pub fn run_install_tui(mut base: Cli) -> Result<Cli> {
         .interact()?;
     if !proceed { return Err(anyhow!("User cancelled")); }
 
-    // Fill internal fields consumed by installer
+    // Fill internal fields consumed by the installer
     base.install_dir = Some(install_dir);
     base.add_startup_service = install_as_service;
     base.add_startup_task = install_as_task;

@@ -52,79 +52,7 @@ pub fn exit_blocking(code: i32) {
     std::process::exit(code);
 }
 
-fn kill_other_instances() -> Result<(), Box<dyn std::error::Error>> {
-    // Determine the image name of the current executable
-    let this_exe = env::current_exe()?;
-    let image_name = this_exe.file_name()
-        .and_then(|s| s.to_str())
-        .ok_or("Failed to determine current executable name")?
-        .to_string();
-
-    let this_pid = std::process::id();
-    info!("Attempting to terminate other running instances of {}...", image_name);
-
-    // Query tasklist for processes with the same image name, in CSV for easier parsing -- somewhat hacky but works
-    let output = Command::new("tasklist")
-        .args(["/FI", &format!("IMAGENAME eq {}", image_name), "/FO", "CSV"])
-        .output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        warn!("tasklist failed while searching for other instances: {}", stderr);
-        return Ok(());
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut killed_any = false;
-
-    for (i, line) in stdout.lines().enumerate() {
-        if i == 0 { continue; } // skip header
-        let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
-        // CSV fields quoted, expect: "Image Name","PID","Session Name","Session#","Mem Usage"
-        // We'll split commas and trim surrounding quotes.
-        let parts: Vec<String> = trimmed.split(',')
-            .map(|s| s.trim().trim_matches('"').to_string())
-            .collect();
-        if parts.len() < 2 { continue; }
-        let pid_str = &parts[1];
-        if let Ok(pid) = pid_str.parse::<u32>() {
-            if pid == this_pid {
-                continue; // skip self
-            }
-            // Attempt to kill this PID
-            let kill = Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]).output();
-            match kill {
-                Ok(res) => {
-                    if res.status.success() {
-                        info!("Terminated process PID {} ({})", pid, image_name);
-                        killed_any = true;
-                    } else {
-                        let stderr = String::from_utf8_lossy(&res.stderr);
-                        // If the process exited between list and kill, ignore the error.
-                        warn!("Failed to terminate PID {}: {}", pid, stderr);
-                    }
-                }
-                Err(e) => warn!("taskkill failed for PID {}: {}", pid, e),
-            }
-        }
-    }
-
-    if killed_any {
-        // Allow a brief moment for the OS to release file handles
-        thread::sleep(Duration::from_millis(500));
-    }
-
-    Ok(())
-}
-
-
 pub fn handle_installation(args: &Cli) {
-    if let Err(e) = kill_other_instances() {
-        warn!("Failed to terminate other instances automatically: {}", e);
-        warn!("Continuing with installation; this may fail if files are locked.");
-    }
-
     let mut install_path = None;
     if let Some(path_str) = &args.install_dir {
         info!("Starting installation...");
@@ -156,7 +84,7 @@ pub fn handle_installation(args: &Cli) {
             },
             Err(e) => {
                 error!("Failed to set up startup service: {:?}", e);
-                println!("\n\n\tSetup failed! Please try again.\n");
+                println!("\n\n\t• Setup failed! Please close all OS windows (including Task Manager, and Services) and try again.\n");
                 exit_blocking(1);
             }
         }
@@ -165,7 +93,7 @@ pub fn handle_installation(args: &Cli) {
     if args.add_startup_task {
         let exe_path = resolve_exe_path(install_path);
         let mut task_args = filtered_passthrough_args();
-        // Always add -silent for scheduled task
+        // Always add `-silent` for scheduled tasks
         task_args.push(OsString::from("-silent"));
 
         match setup_startup_scheduled_task(&exe_path, task_args) {
@@ -349,7 +277,7 @@ fn resolve_exe_path(install_path: Option<PathBuf>) -> PathBuf {
 fn filtered_passthrough_args() -> Vec<OsString> {
     // List of parameters to skip when passing through to the service/task (second arg is whether it takes a value)
     let skip = [
-        (name_of!(install in Cli), false),
+        (name_of!(install_tui in Cli), false),
         (name_of!(install_dir in Cli), true),
         (name_of!(add_startup_service in Cli), false),
         (name_of!(add_startup_task in Cli), false),
@@ -399,7 +327,8 @@ fn remove_existing_service_if_any(manager: &ServiceManager, name: &str, wait_aft
         info!("Service '{}' already exists. Trying to delete it.", name);
         let _ = service.stop();
         if let Err(e) = service.delete() {
-            error!("Failed to delete service '{}'. You might need to close Services and Task Manager windows and/or log out from or restart your computer to proceed", name);
+            error!("Failed to delete service '{}'.", name);
+            error!("You might need to close Services and Task Manager windows and/or log out from or restart your computer to proceed");
             error!("Error: {}", e);
             exit_blocking(2);
         } else {

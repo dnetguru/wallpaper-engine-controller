@@ -5,10 +5,13 @@ mod monitor;
 mod wallpaper;
 mod install;
 
+use std::{env, thread};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::process::Command;
+use std::time::Duration;
 use clap::Parser;
 use tokio::signal;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -24,7 +27,7 @@ use install::handle_installation;
 use monitor::VisibilityMonitor;
 use wallpaper::WallpaperController;
 use crate::install::exit_blocking;
-use crate::install::tui::run_install_tui;
+use crate::install::tui::run_install_tui_and_relaunch;
 
 #[tokio::main(worker_threads = 2)]
 async fn main() {
@@ -100,42 +103,30 @@ async fn main() {
         )
         .init();
 
-    // Launch interactive installer (TUI) when requested explicitly or when no threshold provided
-    if cli.install || (cli.threshold.is_none() && !cli.list_monitors) {
-        // Elevate for installation
-        if !check_elevated().unwrap_or(false) {
-            info!("Requesting administrator privileges...");
-            info!("Process will continue in a new window");
-            drop(instance_mutex);
-
-            if let Err(e) = elevate() {
-                error!("Failed to elevate process: {:?}", e);
-            }
-
-            std::process::exit(0); // Exit the non-elevated process
-        }
-
-        match run_install_tui(cli) {
-            Ok(new_cli) => {
-                // Ensure mutually exclusive startup mode
-                if new_cli.add_startup_service && new_cli.add_startup_task {
-                    error!("Cannot use both Service and Scheduled Task at the same time.");
-                } else {
-                    handle_installation(&new_cli);
-                }
-            }
-            Err(e) => {
-                error!("Installation aborted: {}", e);
-            }
-        }
-
-        return;
-    }
-
-    // Check if we should list monitors
+    // Check if the user asked to list monitors
     if cli.list_monitors {
         print_monitor_list();
         exit_blocking(0);
+    }
+
+    if (raw_args.len() <= 1) || cli.install_tui {
+        elevate_and_kill_others(instance_mutex);
+        if let Err(e) = run_install_tui_and_relaunch(cli) {
+            error!("Installation aborted: {}", e);
+        }
+
+        std::process::exit(0);
+    }
+
+    if cli.install_dir.is_some() || cli.add_startup_service || cli.add_startup_task {
+        if cli.add_startup_service && cli.add_startup_task {
+            error!("Cannot use both --add-startup-service and --add-startup-task");
+            exit_blocking(8);
+        }
+
+        elevate_and_kill_others(instance_mutex);
+        handle_installation(&cli);
+        return;
     }
 
     // Parse monitor IDs
@@ -170,6 +161,88 @@ async fn main() {
     } else {
         error!("Failed to start monitoring task");
     }
+}
+
+fn elevate_and_kill_others(instance_mutex: SingleInstance) {
+    if !check_elevated().unwrap_or(false) {
+        info!("Requesting administrator privileges...");
+        info!("Process will continue in a new window");
+        drop(instance_mutex);
+
+        if let Err(e) = elevate() {
+            error!("Failed to elevate process: {:?}", e);
+        }
+
+        std::process::exit(0); // Exit the non-elevated process
+    } else {
+        kill_other_instances().ok();
+    }
+}
+
+fn kill_other_instances() -> Result<(), Box<dyn std::error::Error>> {
+    // Determine the image name of the current executable
+    let this_exe = env::current_exe()?;
+    let image_name = this_exe.file_name()
+        .and_then(|s| s.to_str())
+        .ok_or("Failed to determine current executable name")?
+        .to_string();
+
+    let this_pid = std::process::id();
+    info!("Attempting to terminate other running instances of {}...", image_name);
+
+    // Query tasklist for processes with the same image name in CSV for easier parsing -- somewhat hacky but works
+    let output = Command::new("tasklist")
+        .args(["/FI", &format!("IMAGENAME eq {}", image_name), "/FO", "CSV"])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!("tasklist failed while searching for other instances: {}", stderr);
+        return Ok(());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut killed_any = false;
+
+    for (i, line) in stdout.lines().enumerate() {
+        if i == 0 { continue; } // skip header
+        let trimmed = line.trim();
+        if trimmed.is_empty() { continue; }
+        // CSV fields quoted, expect: "Image Name","PID","Session Name","Session#","Mem Usage"
+        // We'll split commas and trim surrounding quotes.
+        let parts: Vec<String> = trimmed.split(',')
+            .map(|s| s.trim().trim_matches('"').to_string())
+            .collect();
+        if parts.len() < 2 { continue; }
+        let pid_str = &parts[1];
+        if let Ok(pid) = pid_str.parse::<u32>() {
+            if pid == this_pid {
+                continue; // skip self
+            }
+            // Attempt to kill this PID
+            let kill = Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]).output();
+            match kill {
+                Ok(res) => {
+                    if res.status.success() {
+                        info!("Terminated process PID {} ({})", pid, image_name);
+                        killed_any = true;
+                    } else {
+                        let stderr = String::from_utf8_lossy(&res.stderr);
+                        // If the process exited between list and kill, ignore the error.
+                        warn!("Failed to terminate PID {}: {}", pid, stderr);
+                    }
+                }
+                Err(e) => warn!("taskkill failed for PID {}: {}", pid, e),
+            }
+        }
+    }
+
+    if killed_any {
+        // Allow a brief moment for the OS to release file handles
+        thread::sleep(Duration::from_millis(500));
+    }
+
+    Ok(())
 }
 
 fn print_monitor_list() {
