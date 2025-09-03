@@ -47,6 +47,10 @@ pub struct Cli {
     /// Add a Windows service to run this program with the specified flags and exit
     #[arg(long)]
     pub add_startup_service: bool,
+
+    /// Add a Windows Scheduled Task to run this program at user logon and exit
+    #[arg(long)]
+    pub add_startup_task: bool,
 }
 
 pub fn parse_monitor_indices(input: &str) -> Option<Vec<i64>> {

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::ffi::{OsStr, OsString};
 use std::sync::mpsc;
 use std::time::Duration;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use nameof::name_of;
 use clap::CommandFactory;
@@ -17,6 +17,7 @@ use windows_service::{
     service_manager::{ServiceManager, ServiceManagerAccess},
 };
 use windows_service::service::{Service, ServiceDependency, ServiceInfo};
+use std::process::Command;
 
 use crate::cli::Cli;
 
@@ -24,6 +25,7 @@ const SERVICE_NAME: &str = "WallpaperControllerService";
 const SERVICE_DISPLAY_NAME: &str = "Wallpaper Controller Service";
 const WALLPAPER_ENGINE_SERVICE_NAME: &str = "Wallpaper Engine Service";
 const WALLPAPER_SERVICE_32_PATH: &str = "C:\\WINDOWS\\SysWOW64\\wallpaperservice32.exe";
+const TASK_NAME: &str = "WallpaperControllerAtLogon";
 
 
 pub fn exit_blocking(code: i32) {
@@ -77,38 +79,8 @@ pub fn handle_installation(args: &Cli) {
     }
 
     if args.add_startup_service {
-        let mut service_args: Vec<OsString> = vec![];
-        let exe_path = install_path.unwrap_or_else(|| env::current_exe().expect("Failed to get current exe path"));
-
-        {
-            let cmd = Cli::command();
-            let install_arg = cmd
-                .get_arguments()
-                .find(|a| a.get_id() == name_of!(install in Cli))
-                .unwrap();
-            let add_service_arg = cmd
-                .get_arguments()
-                .find(|a| a.get_id() == name_of!(add_startup_service in Cli))
-                .unwrap();
-
-            let install_flag = format!("--{}", install_arg.get_long().unwrap());
-            let install_flag_eq = format!("--{}=", install_arg.get_long().unwrap());
-            let add_service_flag = format!("--{}", add_service_arg.get_long().unwrap());
-
-            let mut args_iter = std::env::args_os().skip(1);
-            while let Some(arg) = args_iter.next() {
-                if arg == install_flag.as_str() {
-                    // This option takes a value, so we skip the next argument as well.
-                    // This assumes the value is passed as a separate argument.
-                    args_iter.next();
-                } else if arg == add_service_flag.as_str() || arg.to_string_lossy().starts_with(install_flag_eq.as_str()) {
-                    // This handles `--startup-service` and `--install=value` form so we just skip this argument.
-                    continue;
-                } else {
-                    service_args.push(arg);
-                }
-            }
-        }
+        let exe_path = resolve_exe_path(install_path.clone());
+        let service_args = filtered_passthrough_args();
 
         match setup_startup_service(&exe_path, service_args) {
             Ok(svc) => {
@@ -122,6 +94,23 @@ pub fn handle_installation(args: &Cli) {
             },
             Err(e) => {
                 error!("Failed to set up startup service: {:?}", e);
+                exit_blocking(1);
+            }
+        }
+    }
+
+    if args.add_startup_task {
+        let exe_path = resolve_exe_path(install_path);
+        let mut task_args = filtered_passthrough_args();
+        // Always add -silent for scheduled task
+        task_args.push(OsString::from("-silent"));
+
+        match setup_startup_scheduled_task(&exe_path, task_args) {
+            Ok(_) => {
+                info!("Successfully set up the startup scheduled task.");
+            },
+            Err(e) => {
+                error!("Failed to set up startup scheduled task: {:?}", e);
                 exit_blocking(1);
             }
         }
@@ -152,25 +141,15 @@ fn install_executable(target: &str) -> Result<PathBuf, Box<dyn std::error::Error
 fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<Service, Box<dyn std::error::Error>> {
     let manager = ServiceManager::local_computer(None::<&OsStr>, ServiceManagerAccess::all())?;
 
-    if !fs::exists(&WALLPAPER_SERVICE_32_PATH)? {
-        error!("Running this application as a service requires `wallpaperservice32.exe` to have been installed as part of Wallpaper Engine.");
-        info!("You can try setting Wallpaper Engine to run as a service OR use a scheduled task to run this application on startup.");
-        return Err("wallpaperservice32.exe not found".into());
+    ensure_wallpaper_engine_service_present()?;
+
+    // If switching from scheduled task to service, remove the scheduled task first
+    info!("Setting up as a Windows Service. If a scheduled task exists, it will be removed.");
+    if let Err(e) = remove_existing_task_if_any() {
+        warn!("Failed while attempting to remove existing scheduled task '{}': {}", TASK_NAME, e);
     }
 
-    if let Ok(service) = manager.open_service(SERVICE_NAME, ServiceAccess::all()) {
-        info!("Service '{}' already exists. Trying to delete it.", SERVICE_NAME);
-        let _ = service.stop(); // Try and stop first, in case it's running
-        if let Err(e) = service.delete() {
-            error!("Failed to delete service '{}'. You might need to close Services and Task Manager windows and/or log out from or restart your computer to proceed", SERVICE_NAME);
-            error!("Error: {}", e);
-            exit_blocking(2);
-        } else {
-            info!("Service '{}' was marked for deletion successfully.", SERVICE_NAME);
-            info!("Waiting several seconds before continuing...");
-            thread::sleep(Duration::from_secs(6));
-        }
-    }
+    remove_existing_service_if_any(&manager, SERVICE_NAME, Duration::from_secs(6))?;
 
     let mut wallpaper_service_32_args: Vec<OsString> = vec!["-p".into(), exe_path.into()];
     wallpaper_service_32_args.extend(launch_args);
@@ -193,4 +172,158 @@ fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<
     let service = manager.create_service(&service_info, ServiceAccess::ALL_ACCESS)?;
     info!("Service '{}' created successfully.", SERVICE_NAME);
     Ok(service)
+}
+
+fn quote_arg<S: AsRef<OsStr>>(s: S) -> OsString {
+    let s_ref = s.as_ref();
+    let s_str = s_ref.to_string_lossy();
+    if s_str.chars().any(|c| c.is_whitespace()) || s_str.contains(['"', '^', '&', '|', '>', '<']) {
+        let mut q = OsString::from("\"");
+        q.push(&*s_str.replace('"', "\\\""));
+        q.push("\"");
+        q
+    } else {
+        s_ref.to_owned()
+    }
+}
+
+fn setup_startup_scheduled_task(exe_path: &Path, launch_args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error>> {
+    let username = std::env::var("USERNAME").unwrap_or_else(|_| String::from("%USERNAME%"));
+
+    // If switching from service to scheduled task, remove the service first
+    info!("Setting up as a Scheduled Task. If a Windows Service exists, it will be removed.");
+    let manager = ServiceManager::local_computer(None::<&OsStr>, ServiceManagerAccess::all())?;
+    if let Err(e) = remove_existing_service_if_any(&manager, SERVICE_NAME, Duration::from_secs(6)) {
+        warn!("Failed while attempting to remove existing service '{}': {}", SERVICE_NAME, e);
+    }
+
+    fn build_command_line(exe_path: &Path, args: &[OsString]) -> OsString {
+        let mut full_cmd = OsString::new();
+        full_cmd.push(quote_arg(exe_path.as_os_str()));
+        for a in args {
+            full_cmd.push(" ");
+            full_cmd.push(quote_arg(a));
+        }
+        full_cmd
+    }
+
+    // Create or update the task
+    let output = Command::new("schtasks")
+        .args([
+            "/Create", "/TN", TASK_NAME,
+            "/TR",
+        ])
+        .arg(build_command_line(exe_path, &launch_args))
+        .args([
+            "/SC", "ONLOGON",
+            "/RL", "HIGHEST",
+            "/RU", &username,
+            "/F",
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!("schtasks output: {}", stdout);
+        error!("schtasks error: {}", stderr);
+        return Err(format!("schtasks /Create failed with code {:?}", output.status.code()).into());
+    }
+
+    Ok(())
+}
+
+fn resolve_exe_path(install_path: Option<PathBuf>) -> PathBuf {
+    install_path.unwrap_or_else(|| env::current_exe().expect("Failed to get current exe path"))
+}
+
+fn filtered_passthrough_args() -> Vec<OsString> {
+    // List of parameters to skip when passing through to the service/task (second arg is whether it takes a value)
+    let skip = [
+        (name_of!(install in Cli), true),
+        (name_of!(add_startup_service in Cli), false),
+        (name_of!(add_startup_task in Cli), false)
+    ];
+
+    let cmd = Cli::command();
+    let mut skip_flags: Vec<(String, bool)> = Vec::with_capacity(skip.len());
+    for (field_name, takes_value) in skip {
+        if let Some(arg) = cmd.get_arguments().find(|a| a.get_id() == field_name) {
+            if let Some(long) = arg.get_long() {
+                skip_flags.push((format!("--{}", long), takes_value));
+            }
+        }
+    }
+
+    let mut out: Vec<OsString> = vec![];
+    let mut args_iter = std::env::args_os().skip(1);
+    'outer: while let Some(arg) = args_iter.next() {
+        let arg_str = arg.to_string_lossy();
+        for (flag, takes_value) in &skip_flags {
+            let eq_prefix = format!("{}=", flag);
+            if &arg_str == flag {
+                if *takes_value {
+                    let _ = args_iter.next(); // skip value
+                }
+                continue 'outer;
+            } else if arg_str.starts_with(&eq_prefix) {
+                continue 'outer;
+            }
+        }
+        out.push(arg);
+    }
+    out
+}
+
+fn ensure_wallpaper_engine_service_present() -> Result<(), Box<dyn std::error::Error>> {
+    if !fs::exists(&WALLPAPER_SERVICE_32_PATH)? {
+        error!("Running this application as a service requires `wallpaperservice32.exe` to have been installed as part of Wallpaper Engine.");
+        info!("You can try setting Wallpaper Engine to run as a service OR use a scheduled task to run this application on startup.");
+        return Err("wallpaperservice32.exe not found".into());
+    }
+    Ok(())
+}
+
+fn remove_existing_service_if_any(manager: &ServiceManager, name: &str, wait_after_delete: Duration) -> Result<(), Box<dyn std::error::Error>> {
+    if let Ok(service) = manager.open_service(name, ServiceAccess::all()) {
+        info!("Service '{}' already exists. Trying to delete it.", name);
+        let _ = service.stop();
+        if let Err(e) = service.delete() {
+            error!("Failed to delete service '{}'. You might need to close Services and Task Manager windows and/or log out from or restart your computer to proceed", name);
+            error!("Error: {}", e);
+            exit_blocking(2);
+        } else {
+            info!("Service '{}' was marked for deletion successfully.", name);
+            info!("Waiting several seconds before continuing...");
+            thread::sleep(wait_after_delete);
+        }
+    }
+    Ok(())
+}
+
+fn remove_existing_task_if_any() -> Result<(), Box<dyn std::error::Error>> {
+    // Check if the scheduled task exists and delete it if it does.
+    info!("Checking for existing scheduled task '{}'...", TASK_NAME);
+    let query = Command::new("schtasks")
+        .args(["/Query", "/TN", TASK_NAME])
+        .output()?;
+
+    if query.status.success() {
+        info!("Scheduled task '{}' found. Attempting to delete it...", TASK_NAME);
+        let delete_out = Command::new("schtasks")
+            .args(["/Delete", "/TN", TASK_NAME, "/F"]).output()?;
+        if delete_out.status.success() {
+            info!("Scheduled task '{}' deleted successfully.", TASK_NAME);
+        } else {
+            let stdout = String::from_utf8_lossy(&delete_out.stdout);
+            let stderr = String::from_utf8_lossy(&delete_out.stderr);
+            warn!("Failed to delete scheduled task '{}'. stdout: {}", TASK_NAME, stdout);
+            error!("stderr: {}", stderr);
+            return Err(format!("Failed to delete scheduled task '{}' with code {:?}", TASK_NAME, delete_out.status.code()).into());
+        }
+    } else {
+        debug!("Scheduled task '{}' not found; nothing to remove.", TASK_NAME);
+    }
+
+    Ok(())
 }

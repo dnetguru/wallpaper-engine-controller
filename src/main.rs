@@ -101,7 +101,11 @@ async fn main() {
         )
         .init();
 
-    if cli.install.is_some() || cli.add_startup_service {
+    if cli.install.is_some() || cli.add_startup_service || cli.add_startup_task {
+        if cli.add_startup_service && cli.add_startup_task {
+            error!("Cannot use --add-startup-service with --add-startup-task");
+            exit_blocking(8);
+        }
         if any_instance_mutex.is_single() {
             drop(instance_mutex);
             drop(any_instance_mutex);
