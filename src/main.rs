@@ -3,7 +3,7 @@
 mod cli;
 mod monitor;
 mod wallpaper;
-mod installer;
+mod install;
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use clap::Parser;
@@ -17,13 +17,14 @@ use sentry::ClientInitGuard;
 use windows::Win32::System::Console::AllocConsole;
 use windows::Win32::System::Console::AttachConsole;
 use single_instance::SingleInstance;
-use windows_elevate::check_elevated;
+use windows_elevate::{check_elevated, elevate};
 
 use cli::{Cli, parse_monitor_indices};
-use installer::handle_installation;
+use install::handle_installation;
 use monitor::VisibilityMonitor;
 use wallpaper::WallpaperController;
-use crate::installer::exit_blocking;
+use crate::install::exit_blocking;
+use crate::install::tui::run_install_tui;
 
 #[tokio::main(worker_threads = 2)]
 async fn main() {
@@ -99,14 +100,37 @@ async fn main() {
         )
         .init();
 
-    if cli.install.is_some() || cli.add_startup_service || cli.add_startup_task {
-        if cli.add_startup_service && cli.add_startup_task {
-            error!("Cannot use --add-startup-service with --add-startup-task");
-            exit_blocking(8);
-        }
-        drop(instance_mutex);
+    // Launch interactive installer (TUI) when requested explicitly or when no threshold provided
+    if cli.install || cli.threshold.is_none() {
+        // Elevate for installation
+        if !check_elevated().unwrap_or(false) {
+            info!("Requesting administrator privileges...");
+            info!("Process will continue in a new window");
+            drop(instance_mutex);
 
-        handle_installation(&cli);
+            if let Err(e) = elevate() {
+                error!("Failed to elevate process: {:?}", e);
+            }
+
+            std::process::exit(0); // Exit the non-elevated process
+        }
+
+        match run_install_tui(cli) {
+            Ok(new_cli) => {
+                // Ensure mutually exclusive startup mode
+                if new_cli.add_startup_service && new_cli.add_startup_task {
+                    error!("Cannot use both Service and Scheduled Task at the same time.");
+                    exit_blocking(8);
+                }
+                handle_installation(&new_cli);
+                return;
+            }
+            Err(e) => {
+                error!("Installation aborted: {}", e);
+                exit_blocking(0);
+                return;
+            }
+        }
     }
 
     // Check if we should list monitors
@@ -125,7 +149,7 @@ async fn main() {
     let mut monitor = VisibilityMonitor::new(
         controller,
         cli.per_monitor,
-        cli.threshold,
+        cli.threshold.unwrap_or(20),
         monitor_indices,
     );
 

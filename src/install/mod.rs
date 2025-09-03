@@ -10,7 +10,7 @@ use tracing::{debug, error, info, warn};
 use nameof::name_of;
 use clap::CommandFactory;
 use windows::Win32::System::Console::{FreeConsole, GetStdHandle, ReadConsoleW, STD_INPUT_HANDLE};
-use windows_elevate::{check_elevated, elevate};
+use windows_elevate::check_elevated;
 use windows_service::{
     service::{
         ServiceAccess, ServiceErrorControl, ServiceStartType, ServiceType,
@@ -21,6 +21,8 @@ use windows_service::service::{Service, ServiceDependency, ServiceInfo};
 use std::process::Command;
 
 use crate::cli::Cli;
+
+pub mod tui;
 
 const SERVICE_NAME: &str = "WallpaperControllerService";
 const SERVICE_DISPLAY_NAME: &str = "Wallpaper Controller Service";
@@ -42,7 +44,7 @@ pub fn exit_blocking(code: i32) {
             let _ = unsafe { ReadConsoleW(stdin_handle.unwrap(), buffer.as_mut_ptr() as *mut _, buffer.len() as u32, &mut read, None) };
             tx.send(()).ok();
         });
-        if rx.recv_timeout(Duration::from_secs(10)).is_err() {
+        if rx.recv_timeout(Duration::from_secs(15)).is_err() {
             info!("Timeout waiting for user input; exiting.");
         } else {
             thread.join().ok();
@@ -120,25 +122,13 @@ fn kill_other_instances() -> Result<(), Box<dyn std::error::Error>> {
 
 
 pub fn handle_installation(args: &Cli) {
-    if !check_elevated().unwrap_or(false) {
-        info!("Requesting administrator privileges...");
-        info!("Process will continue in a new window");
-
-        if let Err(e) = elevate() {
-            error!("Failed to elevate process: {:?}", e);
-        }
-
-        std::process::exit(0); // Exit the non-elevated process
-    }
-
-    // We are elevated here; proactively terminate any other running instances to avoid file-in-use errors.
     if let Err(e) = kill_other_instances() {
         warn!("Failed to terminate other instances automatically: {}", e);
         warn!("Continuing with installation; this may fail if files are locked.");
     }
 
     let mut install_path = None;
-    if let Some(path_str) = &args.install {
+    if let Some(path_str) = &args.install_dir {
         info!("Starting installation...");
         match install_executable(path_str) {
             Ok(path) => {
@@ -360,9 +350,10 @@ fn resolve_exe_path(install_path: Option<PathBuf>) -> PathBuf {
 fn filtered_passthrough_args() -> Vec<OsString> {
     // List of parameters to skip when passing through to the service/task (second arg is whether it takes a value)
     let skip = [
-        (name_of!(install in Cli), true),
+        (name_of!(install in Cli), false),
+        (name_of!(install_dir in Cli), true),
         (name_of!(add_startup_service in Cli), false),
-        (name_of!(add_startup_task in Cli), false)
+        (name_of!(add_startup_task in Cli), false),
     ];
 
     let cmd = Cli::command();

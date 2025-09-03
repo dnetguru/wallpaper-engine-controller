@@ -9,8 +9,8 @@ pub struct Cli {
     pub monitors: String,
 
     /// Minimum visibility threshold percentage (0-100) to pause the wallpaper engine
-    #[arg(short, long, default_value_t = 20, value_parser = clap::value_parser!(u8).range(0..=100))]
-    pub threshold: u8,
+    #[arg(short, long, value_parser = clap::value_parser!(u8).range(0..=100))]
+    pub threshold: Option<u8>,
 
     /// Per-monitor mode - track visibility for each monitor separately (THIS IS NOT SUPPORTED BY WALLPAPER ENGINE, YET)
     #[arg(short='p', long="per-monitor")]
@@ -40,16 +40,21 @@ pub struct Cli {
     #[arg(long, default_value = "https://c6caa06487e9769daccfbedcd8de6324@o504783.ingest.us.sentry.io/4509839881076736")]
     pub sentry_dsn: Option<String>,
 
-    /// Install the executable into the specified directory and exit
+    /// Launch interactive installer (TUI)
     #[arg(long)]
-    pub install: Option<String>,
+    pub install: bool,
 
-    /// Add a Windows service to run this program with the specified flags and exit
-    #[arg(long)]
+    // Hidden/internal fields populated by the TUI
+    /// Internal: directory chosen by TUI for installation
+    #[arg(skip)]
+    pub install_dir: Option<String>,
+
+    /// Internal: install as Windows Service (chosen by TUI)
+    #[arg(skip)]
     pub add_startup_service: bool,
 
-    /// Add a Windows Scheduled Task to run this program at user logon and exit
-    #[arg(long)]
+    /// Internal: install as Scheduled Task (chosen by TUI)
+    #[arg(skip)]
     pub add_startup_task: bool,
 }
 
