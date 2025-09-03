@@ -1,5 +1,6 @@
-use std::{fs, thread};
 use std::env;
+use std::io::Read;
+use std::{fs, thread};
 use std::path::{Path, PathBuf};
 use std::ffi::{OsStr, OsString};
 use std::sync::mpsc;
@@ -51,6 +52,73 @@ pub fn exit_blocking(code: i32) {
     std::process::exit(code);
 }
 
+fn kill_other_instances() -> Result<(), Box<dyn std::error::Error>> {
+    // Determine the image name of the current executable
+    let this_exe = env::current_exe()?;
+    let image_name = this_exe.file_name()
+        .and_then(|s| s.to_str())
+        .ok_or("Failed to determine current executable name")?
+        .to_string();
+
+    let this_pid = std::process::id();
+    info!("Attempting to terminate other running instances of {}...", image_name);
+
+    // Query tasklist for processes with the same image name, in CSV for easier parsing -- somewhat hacky but works
+    let output = Command::new("tasklist")
+        .args(["/FI", &format!("IMAGENAME eq {}", image_name), "/FO", "CSV"])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!("tasklist failed while searching for other instances: {}", stderr);
+        return Ok(());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut killed_any = false;
+
+    for (i, line) in stdout.lines().enumerate() {
+        if i == 0 { continue; } // skip header
+        let trimmed = line.trim();
+        if trimmed.is_empty() { continue; }
+        // CSV fields quoted, expect: "Image Name","PID","Session Name","Session#","Mem Usage"
+        // We'll split commas and trim surrounding quotes.
+        let parts: Vec<String> = trimmed.split(',')
+            .map(|s| s.trim().trim_matches('"').to_string())
+            .collect();
+        if parts.len() < 2 { continue; }
+        let pid_str = &parts[1];
+        if let Ok(pid) = pid_str.parse::<u32>() {
+            if pid == this_pid {
+                continue; // skip self
+            }
+            // Attempt to kill this PID
+            let kill = Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]).output();
+            match kill {
+                Ok(res) => {
+                    if res.status.success() {
+                        info!("Terminated process PID {} ({})", pid, image_name);
+                        killed_any = true;
+                    } else {
+                        let stderr = String::from_utf8_lossy(&res.stderr);
+                        // If the process exited between list and kill, ignore the error.
+                        warn!("Failed to terminate PID {}: {}", pid, stderr);
+                    }
+                }
+                Err(e) => warn!("taskkill failed for PID {}: {}", pid, e),
+            }
+        }
+    }
+
+    if killed_any {
+        // Allow a brief moment for the OS to release file handles
+        thread::sleep(Duration::from_millis(500));
+    }
+
+    Ok(())
+}
+
+
 pub fn handle_installation(args: &Cli) {
     if !check_elevated().unwrap_or(false) {
         info!("Requesting administrator privileges...");
@@ -63,6 +131,12 @@ pub fn handle_installation(args: &Cli) {
         std::process::exit(0); // Exit the non-elevated process
     }
 
+    // We are elevated here; proactively terminate any other running instances to avoid file-in-use errors.
+    if let Err(e) = kill_other_instances() {
+        warn!("Failed to terminate other instances automatically: {}", e);
+        warn!("Continuing with installation; this may fail if files are locked.");
+    }
+
     let mut install_path = None;
     if let Some(path_str) = &args.install {
         info!("Starting installation...");
@@ -72,7 +146,7 @@ pub fn handle_installation(args: &Cli) {
                 install_path = Some(path);
             }
             Err(e) => {
-                error!("Installation failed (does the file already exist and a process running?): {:}", e);
+                error!("Installation failed: {:}", e);
                 exit_blocking(1);
             }
         }
@@ -122,16 +196,61 @@ pub fn handle_installation(args: &Cli) {
 
 fn install_executable(target: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let current_exe = env::current_exe()?;
-    let target_path = PathBuf::from(target);
+    let input_path = PathBuf::from(target);
 
-    // TODO: Check if the path is a directory, if so append the assembly name
-
-    if fs::exists(&target_path)? {
-        fs::remove_file(&target_path)?;
+    fn compute_file_hash(path: &Path) -> Result<blake3::Hash, Box<dyn std::error::Error>> {
+        let mut file = fs::File::open(path)?;
+        let mut hasher = blake3::Hasher::new();
+        let mut buf = [0u8; 8192];
+        loop {
+            let read = file.read(&mut buf)?;
+            if read == 0 { break; }
+            hasher.update(&buf[..read]);
+        }
+        Ok(hasher.finalize())
     }
 
-    if let Some(parent) = target_path.parent() {
-        fs::create_dir_all(parent)?;
+    // Ensure the target is a directory (existing or to be created). We do not accept file paths.
+    if fs::exists(&input_path)? {
+        let meta = fs::metadata(&input_path)?;
+        if meta.is_file() {
+            return Err(format!("Install target '{}' is a file; expected a directory", input_path.display()).into());
+        }
+        // It exists and is a directory
+        fs::create_dir_all(&input_path)?;
+    } else {
+        // If the user passed a path that looks like a file (e.g., ends with .exe), reject it
+        if input_path.extension().is_some_and(|ext| ext.to_string_lossy().eq_ignore_ascii_case("exe")) {
+            return Err(format!("Install target '{}' appears to be a file path; please specify a directory", input_path.display()).into());
+        }
+        fs::create_dir_all(&input_path)?;
+    }
+
+    // Construct the final target file path using the fixed executable name
+    let target_path = input_path.join("wallpaper-controller.exe");
+
+    // If target exists, compare hashes before copying
+    if fs::exists(&target_path)? {
+        match (compute_file_hash(&current_exe), compute_file_hash(&target_path)) {
+            (Ok(src_hash), Ok(dst_hash)) => {
+                if src_hash == dst_hash {
+                    info!("Same version already present at {} (hash {}).", target_path.display(), src_hash.to_hex());
+                    info!("Skipping copy.");
+                    return Ok(target_path);
+                } else {
+                    info!("Different contents detected at {}.", target_path.display());
+                    info!("Updating...");
+                }
+            }
+            (e1, e2) => {
+                warn!("Failed to compute hash for comparison (src: {:?}, dst: {:?}).", e1.err(), e2.err());
+                info!("Proceeding to replace file.");
+            }
+        }
+        // Remove old file before copy
+        fs::remove_file(&target_path)?;
+    } else {
+        info!("Installing new copy to {}", target_path.display());
     }
 
     fs::copy(&current_exe, &target_path)?;
@@ -144,7 +263,7 @@ fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<
     ensure_wallpaper_engine_service_present()?;
 
     // If switching from scheduled task to service, remove the scheduled task first
-    info!("Setting up as a Windows Service. If a scheduled task exists, it will be removed.");
+    info!("Setting up as a Windows Service.");
     if let Err(e) = remove_existing_task_if_any() {
         warn!("Failed while attempting to remove existing scheduled task '{}': {}", TASK_NAME, e);
     }
@@ -191,7 +310,8 @@ fn setup_startup_scheduled_task(exe_path: &Path, launch_args: Vec<OsString>) -> 
     let username = std::env::var("USERNAME").unwrap_or_else(|_| String::from("%USERNAME%"));
 
     // If switching from service to scheduled task, remove the service first
-    info!("Setting up as a Scheduled Task. If a Windows Service exists, it will be removed.");
+    info!("Setting up as a Scheduled Task.");
+    info!("If a startup service installation exists, it will be removed.");
     let manager = ServiceManager::local_computer(None::<&OsStr>, ServiceManagerAccess::all())?;
     if let Err(e) = remove_existing_service_if_any(&manager, SERVICE_NAME, Duration::from_secs(6)) {
         warn!("Failed while attempting to remove existing service '{}': {}", SERVICE_NAME, e);

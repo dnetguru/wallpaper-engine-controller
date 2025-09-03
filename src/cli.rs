@@ -40,7 +40,7 @@ pub struct Cli {
     #[arg(long, default_value = "https://c6caa06487e9769daccfbedcd8de6324@o504783.ingest.us.sentry.io/4509839881076736")]
     pub sentry_dsn: Option<String>,
 
-    /// Copy the assembly to the specified path and exit (must end with .exe)
+    /// Install the executable into the specified directory and exit
     #[arg(long)]
     pub install: Option<String>,
 

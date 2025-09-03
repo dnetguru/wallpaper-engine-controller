@@ -16,6 +16,7 @@ single-instance = "0.3.3"
 windows-service = "0.8.0"
 windows-elevate = "0.1.0"
 nameof = "1.3.0"
+blake3 = "1.5"
 
 [profile.release]
 lto = "fat"            # Link-time optimization for better inlining

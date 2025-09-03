@@ -56,13 +56,11 @@ async fn main() {
     let mut hasher = DefaultHasher::new();
     filtered_args[1..].join("|").hash(&mut hasher);
     let instance_mutex = SingleInstance::new(&format!("Global\\WallpaperController_{}", hasher.finish())).unwrap();
-    let any_instance_mutex = SingleInstance::new("Global\\WallpaperController_Any").unwrap();
 
     if !instance_mutex.is_single() {
         if !in_silent_mode {
             eprintln!("Another instance with the same arguments is already running.");
             drop(instance_mutex);
-            drop(any_instance_mutex);
             exit_blocking(5);
         }
         return;
@@ -90,7 +88,7 @@ async fn main() {
 
     tracing_subscriber::registry()
         .with(filter, )
-        .with(tracing_subscriber::fmt::layer().with_ansi(ansi_colors))
+        .with(tracing_subscriber::fmt::layer().with_ansi(ansi_colors).without_time())
         .with(
             sentry::integrations::tracing::layer().event_filter(|md|
                 match *md.level() {
@@ -106,15 +104,9 @@ async fn main() {
             error!("Cannot use --add-startup-service with --add-startup-task");
             exit_blocking(8);
         }
-        if any_instance_mutex.is_single() {
-            drop(instance_mutex);
-            drop(any_instance_mutex);
+        drop(instance_mutex);
 
-            handle_installation(&cli);
-        } else {
-            error!("There are other instances of WallpaperController running. Please close them before attempting a reinstall.");
-            exit_blocking(5);
-        }
+        handle_installation(&cli);
     }
 
     // Check if we should list monitors
