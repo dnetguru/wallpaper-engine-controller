@@ -101,7 +101,7 @@ async fn main() {
         .init();
 
     // Launch interactive installer (TUI) when requested explicitly or when no threshold provided
-    if cli.install || cli.threshold.is_none() {
+    if cli.install || (cli.threshold.is_none() && !cli.list_monitors) {
         // Elevate for installation
         if !check_elevated().unwrap_or(false) {
             info!("Requesting administrator privileges...");
@@ -120,17 +120,16 @@ async fn main() {
                 // Ensure mutually exclusive startup mode
                 if new_cli.add_startup_service && new_cli.add_startup_task {
                     error!("Cannot use both Service and Scheduled Task at the same time.");
-                    exit_blocking(8);
+                } else {
+                    handle_installation(&new_cli);
                 }
-                handle_installation(&new_cli);
-                return;
             }
             Err(e) => {
                 error!("Installation aborted: {}", e);
-                exit_blocking(0);
-                return;
             }
         }
+
+        return;
     }
 
     // Check if we should list monitors

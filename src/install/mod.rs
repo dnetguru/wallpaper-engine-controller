@@ -9,8 +9,7 @@ use tracing::{debug, error, info, warn};
 
 use nameof::name_of;
 use clap::CommandFactory;
-use windows::Win32::System::Console::{FreeConsole, GetStdHandle, ReadConsoleW, STD_INPUT_HANDLE};
-use windows_elevate::check_elevated;
+use windows::Win32::System::Console::{GetStdHandle, ReadConsoleW, STD_INPUT_HANDLE};
 use windows_service::{
     service::{
         ServiceAccess, ServiceErrorControl, ServiceStartType, ServiceType,
@@ -50,7 +49,6 @@ pub fn exit_blocking(code: i32) {
             thread.join().ok();
         }
     }
-    if !check_elevated().unwrap_or(false) { unsafe { FreeConsole() }.ok(); }
     std::process::exit(code);
 }
 
@@ -158,6 +156,7 @@ pub fn handle_installation(args: &Cli) {
             },
             Err(e) => {
                 error!("Failed to set up startup service: {:?}", e);
+                println!("\n\n\tSetup failed! Please try again.\n");
                 exit_blocking(1);
             }
         }

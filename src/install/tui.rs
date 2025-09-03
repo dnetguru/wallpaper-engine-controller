@@ -129,15 +129,23 @@ pub fn run_install_tui(mut base: Cli) -> Result<Cli> {
         .join(".wallpaper-controller")
         .to_string_lossy().to_string();
 
-    println!("\nInstall location: Press enter to accept the default location");
+    println!("\n• Install location: Press enter to accept the default location");
     let install_dir: String = Input::with_theme(&theme)
         .with_prompt("Install directory")
         .default(default_dir_str)
         .validate_with(|s: &String| validate_install_dir(s))
         .interact_text()?;
 
+    // Monitors (validated)
+    println!("\n• Monitors: Specify which monitors should be considered when calculating desktop visibility.\n   Specify 'all' to monitor all displays\n   Or specify a comma-separated list of display numbers as shown in Windows Display Settings (e.g., 1,2)");
+    base.monitors = Input::with_theme(&theme)
+        .with_prompt("Monitors to watch ('all' or e.g. '2' or '1,2')")
+        .default(base.monitors.clone())
+        .validate_with(|s: &String| validate_monitors(s))
+        .interact_text()?;
+
     // Threshold (mandatory)
-    println!("\nVisibility threshold: Percentage of the desktop that must remain visible before wallpapers are paused.");
+    println!("\n• Visibility threshold: Percentage of the desktop (across enabled monitors) that must remain visible before wallpapers are paused.");
     let th_str: String = Input::with_theme(&theme)
         .with_prompt("Visibility threshold (0–100)")
         .default("20".into())
@@ -145,40 +153,28 @@ pub fn run_install_tui(mut base: Cli) -> Result<Cli> {
         .interact_text()?;
     base.threshold = Some(th_str.trim().parse::<u8>()?);
 
-    // Monitors (validated)
-    println!("\nMonitors: Enter 'all' to monitor all displays, or a comma-separated list of display numbers as shown in Windows Display Settings (e.g., 1,2)");
-    base.monitors = Input::with_theme(&theme)
-        .with_prompt("Monitors to watch ('all' or e.g. 1,2)")
-        .default(base.monitors.clone())
-        .validate_with(|s: &String| validate_monitors(s))
-        .interact_text()?;
-
     // Advanced options
+    println!();
     let advanced = Confirm::with_theme(&theme)
-        .with_prompt("\nOpen advanced configuration?")
+        .with_prompt("Open advanced configuration?")
         .default(false)
         .interact()?;
 
     if advanced {
-        println!("\nUpdate rate: How often to recalculate visibility (in milliseconds). Lower = more responsive, higher CPU. Suggest 200–5000.");
+        println!("\n• Update rate: How often to recalculate visibility (in milliseconds). Lower = more responsive, higher CPU. Suggest 200–5000.");
         let upd_str: String = Input::with_theme(&theme)
             .with_prompt("Update rate in ms (100–60000)")
             .default(base.update_rate.to_string())
             .validate_with(|s: &String| validate_update_rate(s))
             .interact_text()?;
-        base.update_rate = upd_str.trim().parse::<u64>().unwrap();
-
-        base.per_monitor = Confirm::with_theme(&theme)
-            .with_prompt("Enable per-monitor mode? (Note: not yet supported by Wallpaper Engine)")
-            .default(base.per_monitor)
-            .interact()?;
+        base.update_rate = upd_str.trim().parse::<u64>()?;
 
         base.bit64 = Confirm::with_theme(&theme)
-            .with_prompt("Use 64-bit Wallpaper Engine (wallpaper64.exe)?")
+            .with_prompt("• Use 64-bit Wallpaper Engine (wallpaper64.exe)?")
             .default(base.bit64)
             .interact()?;
 
-        println!("\nWallpaper Engine folder: Typically under Steam, e.g. C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine");
+        println!("\n• Wallpaper Engine folder:");
         base.wallpaper_engine_path = Input::with_theme(&theme)
             .with_prompt("Wallpaper Engine install path")
             .default(base.wallpaper_engine_path.clone())
