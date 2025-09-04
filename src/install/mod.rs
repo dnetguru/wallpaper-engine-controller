@@ -84,7 +84,7 @@ pub fn handle_installation(args: &Cli) {
             },
             Err(e) => {
                 error!("Failed to set up startup service: {:?}", e);
-                println!("\n\n\t• Setup failed! Please close all OS windows (including Task Manager, and Services) and try again.\n");
+                println!("\n\n\t• Setup failed! Please try again.\n\tIf the issue persists please make sure to close all OS windows (including Task Manager, and Services) before retrying.\n");
                 exit_blocking(1);
             }
         }
@@ -255,6 +255,7 @@ fn setup_startup_scheduled_task(exe_path: &Path, launch_args: Vec<OsString>) -> 
             "/SC", "ONLOGON",
             "/RL", "HIGHEST",
             "/RU", &username,
+            "/DELAY", "0001:15",
             "/F",
         ])
         .output()?;
