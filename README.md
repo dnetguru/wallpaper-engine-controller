@@ -30,6 +30,7 @@ Note: Wallpaper Engine currently only supports pausing/resuming all monitors at 
 - Windows (tested on Windows 11).
 - Wallpaper Engine installed.
   - For Windows Service startup: enable Wallpaper Engine’s “High Priority mode (Run as service)” in WE settings (this installs the service and `C:\WINDOWS\SysWOW64\wallpaperservice32.exe`). In the Wallpaper Engine UI, this is called “High Priority mode.”
+- Non-web based Wallpaper (WE does not support pausing/resuming Web based wallpapers)
 - Rust (only if building from source; see below).
 
 ## Installation (Interactive – Recommended)
