@@ -21,6 +21,7 @@ use windows::Win32::System::Console::AllocConsole;
 use windows::Win32::System::Console::{AttachConsole};
 use single_instance::SingleInstance;
 use windows_elevate::{check_elevated, elevate};
+use anyhow::{Result, anyhow};
 
 use cli::{Cli, parse_monitor_indices};
 use install::handle_installation;
@@ -179,12 +180,12 @@ fn elevate_and_kill_others(instance_mutex: SingleInstance) {
     }
 }
 
-fn kill_other_instances() -> Result<(), Box<dyn std::error::Error>> {
+fn kill_other_instances() -> Result<()> {
     // Determine the image name of the current executable
     let this_exe = env::current_exe()?;
     let image_name = this_exe.file_name()
         .and_then(|s| s.to_str())
-        .ok_or("Failed to determine current executable name")?
+        .ok_or_else(|| anyhow!("Failed to determine current executable name"))?
         .to_string();
 
     let this_pid = std::process::id();

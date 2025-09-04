@@ -6,6 +6,7 @@ use std::ffi::{OsStr, OsString};
 use std::sync::mpsc;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
+use anyhow::{Result, bail};
 
 use nameof::name_of;
 use clap::CommandFactory;
@@ -111,11 +112,11 @@ pub fn handle_installation(args: &Cli) {
     exit_blocking(0);
 }
 
-fn install_executable(target: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn install_executable(target: &str) -> Result<PathBuf> {
     let current_exe = env::current_exe()?;
     let input_path = PathBuf::from(target);
 
-    fn compute_file_hash(path: &Path) -> Result<blake3::Hash, Box<dyn std::error::Error>> {
+    fn compute_file_hash(path: &Path) -> Result<blake3::Hash> {
         let mut file = fs::File::open(path)?;
         let mut hasher = blake3::Hasher::new();
         let mut buf = [0u8; 8192];
@@ -131,14 +132,14 @@ fn install_executable(target: &str) -> Result<PathBuf, Box<dyn std::error::Error
     if fs::exists(&input_path)? {
         let meta = fs::metadata(&input_path)?;
         if meta.is_file() {
-            return Err(format!("Install target '{}' is a file; expected a directory", input_path.display()).into());
+            bail!("Install target '{}' is a file; expected a directory", input_path.display());
         }
         // It exists and is a directory
         fs::create_dir_all(&input_path)?;
     } else {
         // If the user passed a path that looks like a file (e.g., ends with .exe), reject it
         if input_path.extension().is_some_and(|ext| ext.to_string_lossy().eq_ignore_ascii_case("exe")) {
-            return Err(format!("Install target '{}' appears to be a file path; please specify a directory", input_path.display()).into());
+            bail!("Install target '{}' appears to be a file path; please specify a directory", input_path.display());
         }
         fs::create_dir_all(&input_path)?;
     }
@@ -174,7 +175,7 @@ fn install_executable(target: &str) -> Result<PathBuf, Box<dyn std::error::Error
     Ok(target_path)
 }
 
-fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<Service, Box<dyn std::error::Error>> {
+fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<Service> {
     let manager = ServiceManager::local_computer(None::<&OsStr>, ServiceManagerAccess::all())?;
 
     ensure_wallpaper_engine_service_present()?;
@@ -222,7 +223,7 @@ fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<
                 }
                 Err(e) => {
                     error!("Second attempt to create service '{}' failed: {}", SERVICE_NAME, e);
-                    Err(Box::new(e))
+                    Err(e.into())
                 }
             }
         }
@@ -242,10 +243,10 @@ fn quote_arg<S: AsRef<OsStr>>(s: S) -> OsString {
     }
 }
 
-fn setup_startup_scheduled_task(exe_path: &Path, launch_args: Vec<OsString>) -> Result<(), Box<dyn std::error::Error>> {
+fn setup_startup_scheduled_task(exe_path: &Path, launch_args: Vec<OsString>) -> Result<()> {
     let username = std::env::var("USERNAME").unwrap_or_else(|_| String::from("%USERNAME%"));
 
-    // If switching from service to scheduled task, remove the service first
+    // If switching from service to scheduled tasks, remove the service first
     info!("Setting up as a Scheduled Task.");
     info!("If a startup service installation exists, it will be removed.");
     let manager = ServiceManager::local_computer(None::<&OsStr>, ServiceManagerAccess::all())?;
@@ -284,7 +285,7 @@ fn setup_startup_scheduled_task(exe_path: &Path, launch_args: Vec<OsString>) -> 
         let stderr = String::from_utf8_lossy(&output.stderr);
         warn!("schtasks output: {}", stdout);
         error!("schtasks error: {}", stderr);
-        return Err(format!("schtasks /Create failed with code {:?}", output.status.code()).into());
+        bail!("schtasks /Create failed with code {:?}", output.status.code());
     }
 
     Ok(())
@@ -333,16 +334,16 @@ fn filtered_passthrough_args() -> Vec<OsString> {
     out
 }
 
-fn ensure_wallpaper_engine_service_present() -> Result<(), Box<dyn std::error::Error>> {
+fn ensure_wallpaper_engine_service_present() -> Result<()> {
     if !fs::exists(&WALLPAPER_SERVICE_32_PATH)? {
         error!("Running this application as a service requires `wallpaperservice32.exe` to have been installed as part of Wallpaper Engine.");
         info!("You can try setting Wallpaper Engine to run as a service OR use a scheduled task to run this application on startup.");
-        return Err("wallpaperservice32.exe not found".into());
+        bail!("wallpaperservice32.exe not found");
     }
     Ok(())
 }
 
-fn remove_existing_service_if_any(manager: &ServiceManager, name: &str, wait_after_delete: Duration) -> Result<(), Box<dyn std::error::Error>> {
+fn remove_existing_service_if_any(manager: &ServiceManager, name: &str, wait_after_delete: Duration) -> Result<()> {
     if let Ok(service) = manager.open_service(name, ServiceAccess::all()) {
         info!("Service '{}' already exists. Trying to delete it.", name);
         let _ = service.stop();
@@ -360,7 +361,7 @@ fn remove_existing_service_if_any(manager: &ServiceManager, name: &str, wait_aft
     Ok(())
 }
 
-fn remove_existing_task_if_any() -> Result<(), Box<dyn std::error::Error>> {
+fn remove_existing_task_if_any() -> Result<()> {
     // Check if the scheduled task exists and delete it if it does.
     info!("Checking for existing scheduled task '{}'...", TASK_NAME);
     let query = Command::new("schtasks")
@@ -378,7 +379,7 @@ fn remove_existing_task_if_any() -> Result<(), Box<dyn std::error::Error>> {
             let stderr = String::from_utf8_lossy(&delete_out.stderr);
             warn!("Failed to delete scheduled task '{}'. stdout: {}", TASK_NAME, stdout);
             error!("stderr: {}", stderr);
-            return Err(format!("Failed to delete scheduled task '{}' with code {:?}", TASK_NAME, delete_out.status.code()).into());
+            bail!("Failed to delete scheduled task '{}' with code {:?}", TASK_NAME, delete_out.status.code());
         }
     } else {
         debug!("Scheduled task '{}' not found; nothing to remove.", TASK_NAME);
