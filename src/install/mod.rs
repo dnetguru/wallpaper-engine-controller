@@ -205,9 +205,28 @@ fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<
         dependencies: vec![ServiceDependency::Service(WALLPAPER_ENGINE_SERVICE_NAME.into())],
     };
 
-    let service = manager.create_service(&service_info, ServiceAccess::ALL_ACCESS)?;
-    info!("Service '{}' created successfully.", SERVICE_NAME);
-    Ok(service)
+    // Try to create the service; if it fails (likely because deletion hasn't finalized), wait and retry once.
+    match manager.create_service(&service_info, ServiceAccess::ALL_ACCESS) {
+        Ok(service) => {
+            info!("Service '{}' created successfully.", SERVICE_NAME);
+            Ok(service)
+        }
+        Err(first_err) => {
+            warn!("First attempt to create service '{}' failed: {}", SERVICE_NAME, first_err);
+            info!("Waiting several more seconds before retrying service creation...");
+            thread::sleep(Duration::from_secs(6));
+            match manager.create_service(&service_info, ServiceAccess::ALL_ACCESS) {
+                Ok(service) => {
+                    info!("Service '{}' created successfully on retry.", SERVICE_NAME);
+                    Ok(service)
+                }
+                Err(e) => {
+                    error!("Second attempt to create service '{}' failed: {}", SERVICE_NAME, e);
+                    Err(Box::new(e))
+                }
+            }
+        }
+    }
 }
 
 fn quote_arg<S: AsRef<OsStr>>(s: S) -> OsString {
