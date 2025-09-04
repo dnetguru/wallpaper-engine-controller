@@ -213,8 +213,8 @@ fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<
         }
         Err(first_err) => {
             warn!("First attempt to create service '{}' failed: {}", SERVICE_NAME, first_err);
-            info!("Waiting several more seconds before retrying service creation...");
-            thread::sleep(Duration::from_secs(6));
+            info!("Waiting ten more seconds before retrying service creation...");
+            thread::sleep(Duration::from_secs(10));
             match manager.create_service(&service_info, ServiceAccess::ALL_ACCESS) {
                 Ok(service) => {
                     info!("Service '{}' created successfully on retry.", SERVICE_NAME);

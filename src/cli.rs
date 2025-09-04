@@ -17,7 +17,7 @@ pub struct Cli {
     pub per_monitor: bool,
 
     /// Maximum update frequency in milliseconds
-    #[arg(short, long, default_value_t = 1000)]
+    #[arg(short, long, default_value_t = 500)]
     pub update_rate: u64,
 
     /// Path to Wallpaper Engine executable
