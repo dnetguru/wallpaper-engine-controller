@@ -18,7 +18,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use sentry::integrations::tracing::EventFilter;
 use sentry::ClientInitGuard;
 use windows::Win32::System::Console::AllocConsole;
-use windows::Win32::System::Console::AttachConsole;
+use windows::Win32::System::Console::{AttachConsole};
 use single_instance::SingleInstance;
 use windows_elevate::{check_elevated, elevate};
 
@@ -202,34 +202,84 @@ fn kill_other_instances() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut killed_any = false;
 
+    // Collect target PIDs (excluding self)
+    let mut target_pids: Vec<u32> = Vec::new();
     for (i, line) in stdout.lines().enumerate() {
         if i == 0 { continue; } // skip header
         let trimmed = line.trim();
         if trimmed.is_empty() { continue; }
         // CSV fields quoted, expect: "Image Name","PID","Session Name","Session#","Mem Usage"
-        // We'll split commas and trim surrounding quotes.
         let parts: Vec<String> = trimmed.split(',')
             .map(|s| s.trim().trim_matches('"').to_string())
             .collect();
         if parts.len() < 2 { continue; }
-        let pid_str = &parts[1];
-        if let Ok(pid) = pid_str.parse::<u32>() {
-            if pid == this_pid {
-                continue; // skip self
+        if let Ok(pid) = parts[1].parse::<u32>() {
+            if pid != this_pid { target_pids.push(pid); }
+        }
+    }
+
+    if target_pids.is_empty() {
+        return Ok(());
+    }
+
+    // First, try a graceful termination using taskkill without /F (no console tricks)
+    for pid in &target_pids {
+        let res = Command::new("taskkill")
+            .args(["/PID", &pid.to_string()])
+            .output();
+        match res {
+            Ok(out) => {
+                if out.status.success() {
+                    info!("Requested graceful termination for PID {} ({})", pid, image_name);
+                } else {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    warn!("Graceful taskkill failed for PID {}: {}", pid, stderr);
+                }
             }
-            // Attempt to kill this PID
+            Err(e) => warn!("taskkill (graceful) failed for PID {}: {}", pid, e),
+        }
+    }
+
+    // Wait 2.5 seconds to allow graceful shutdown
+    thread::sleep(Duration::from_millis(2500));
+
+    // Force-kill any remaining instances
+    let output2 = Command::new("tasklist")
+        .args(["/FI", &format!("IMAGENAME eq {}", image_name), "/FO", "CSV"])
+        .output()?;
+
+    if !output2.status.success() {
+        let stderr = String::from_utf8_lossy(&output2.stderr);
+        warn!("tasklist failed while verifying remaining instances: {}", stderr);
+        return Ok(());
+    }
+
+    let stdout2 = String::from_utf8_lossy(&output2.stdout);
+    let mut killed_any = false;
+
+    for (i, line) in stdout2.lines().enumerate() {
+        if i == 0 { continue; }
+        let trimmed = line.trim();
+        if trimmed.is_empty() { continue; }
+        let parts: Vec<String> = trimmed
+            .split(',')
+            .map(|s| s.trim().trim_matches('"').to_string())
+            .collect();
+        if parts.len() < 2 { continue; }
+        if let Ok(pid) = parts[1].parse::<u32>() {
+            if pid == this_pid { continue; }
+            if !target_pids.contains(&pid) { continue; } // only those we targeted
+
             let kill = Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]).output();
             match kill {
                 Ok(res) => {
                     if res.status.success() {
-                        info!("Terminated process PID {} ({})", pid, image_name);
+                        info!("Force terminated process PID {} ({})", pid, image_name);
                         killed_any = true;
                     } else {
                         let stderr = String::from_utf8_lossy(&res.stderr);
-                        // If the process exited between list and kill, ignore the error.
-                        warn!("Failed to terminate PID {}: {}", pid, stderr);
+                        warn!("Failed to force terminate PID {}: {}", pid, stderr);
                     }
                 }
                 Err(e) => warn!("taskkill failed for PID {}: {}", pid, e),
