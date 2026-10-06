@@ -28,6 +28,7 @@ const SERVICE_NAME: &str = "WallpaperControllerService";
 const SERVICE_DISPLAY_NAME: &str = "Wallpaper Controller Service";
 const WALLPAPER_ENGINE_SERVICE_NAME: &str = "Wallpaper Engine Service";
 const WALLPAPER_SERVICE_32_PATH: &str = "C:\\WINDOWS\\SysWOW64\\wallpaperservice32.exe";
+const WALLPAPER_SERVICE_64_PATH: &str = "C:\\Windows\\System32\\wallpaperservice64.exe";
 const TASK_NAME: &str = "WallpaperControllerAtLogon";
 
 
@@ -193,13 +194,15 @@ fn setup_startup_service(exe_path: &Path, launch_args: Vec<OsString>) -> Result<
 
     debug!("Executable: {} | Launch args: {:?}", SERVICE_NAME, wallpaper_service_32_args);
 
+    let wallpaper_service_path = if fs::exists(&WALLPAPER_SERVICE_32_PATH)? {WALLPAPER_SERVICE_32_PATH} else {WALLPAPER_SERVICE_64_PATH};
+
     let service_info = ServiceInfo {
         name: SERVICE_NAME.into(),
         display_name: SERVICE_DISPLAY_NAME.into(),
         service_type: ServiceType::OWN_PROCESS,
         start_type: ServiceStartType::AutoStart,
         error_control: ServiceErrorControl::Normal,
-        executable_path: WALLPAPER_SERVICE_32_PATH.into(),
+        executable_path: wallpaper_service_path.into(),
         launch_arguments: wallpaper_service_32_args,
         account_name: None,
         account_password: None,
@@ -335,10 +338,10 @@ fn filtered_passthrough_args() -> Vec<OsString> {
 }
 
 fn ensure_wallpaper_engine_service_present() -> Result<()> {
-    if !fs::exists(&WALLPAPER_SERVICE_32_PATH)? {
-        error!("Running this application as a service requires `wallpaperservice32.exe` to have been installed as part of Wallpaper Engine.");
+    if !fs::exists(&WALLPAPER_SERVICE_32_PATH)? && !fs::exists(&WALLPAPER_SERVICE_64_PATH)? {
+        error!("Running this application as a service requires `wallpaperservice32.exe` / `wallpaperservice64.exe` to have been installed as part of Wallpaper Engine.");
         info!("You can try setting Wallpaper Engine to run as a service OR use a scheduled task to run this application on startup.");
-        bail!("wallpaperservice32.exe not found");
+        bail!("wallpaperservice executable not found");
     }
     Ok(())
 }
